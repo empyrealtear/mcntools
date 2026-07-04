@@ -1,8 +1,10 @@
+import os
+
 FONT_FAMILY = "Microsoft YaHei"
 FONT_DEFAULT = (FONT_FAMILY, 10)
 BACKUP_EXT = '.bak'
-TEMPFILE_PREFIX = 'tempzip_'
-CONFIG_FILE = "config.json"
+CONFIG_FILE = os.path.join('.', "config.json")
+WORKSPACE_DIR = os.path.join('.', '.workspace')
 
 LANGUAGES = {
     'auto': '自动检测',

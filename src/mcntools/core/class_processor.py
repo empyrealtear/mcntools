@@ -19,10 +19,8 @@ class ClassFileProcessor:
         cf = kirjava_load(file_data)
         result = {}
         for idx, entry in cf.constant_pool:
-            if getattr(entry.type, 'name', None) == 'java/lang/String' and entry.value:
-                text = str(entry.value)
-                if text.strip():
-                    result[idx] = text
+            if getattr(entry.type, 'name', None) == 'java/lang/String':
+                result[idx] = entry.value
         return result
 
     def apply_translations(self, path: str, translations: Dict[str, str], file_data: bytes, output_path: str) -> int:

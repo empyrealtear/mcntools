@@ -1,8 +1,6 @@
 import json
 import os
 import re
-import shutil
-import tempfile
 import threading
 import tkinter as tk
 import ttkbootstrap as ttkb
@@ -11,8 +9,8 @@ from ttkbootstrap.widgets.scrolled import ScrolledText
 from ttkbootstrap.dialogs import Messagebox
 from typing import Dict
 
-from mcntools.config import BACKUP_EXT, CONFIG_FILE, FONT_DEFAULT, FONT_FAMILY, LANGUAGES, ENGINES, TEMPFILE_PREFIX
-from mcntools.core import JarFileHandler, BackupManager, ClassFileProcessor, TranslationManager, TranslationService
+from mcntools.config import BACKUP_EXT, CONFIG_FILE, FONT_DEFAULT, FONT_FAMILY, LANGUAGES, ENGINES
+from mcntools.core import TranslationService, WorkspaceManager
 from mcntools.translators import TranslatorFactory
 from mcntools.ui import WorkspaceTree, FilteredTreeview
 from mcntools.ui.preview import FilePreview
@@ -67,21 +65,11 @@ class JARClassTranslator:
         return TranslatorFactory.create(engine, self._get_api_key(engine), 'auto', to_code)
 
     def _init_services(self):
-        self.jar_path = None
-        self.jar_name = None
-        self.temp_dir = None
-        self.current_path = None
+        self.workspace_manager = WorkspaceManager()
+        self.service = TranslationService(self.workspace_manager)
 
-        self.jar_handler = JarFileHandler("")
-        self.backup_manager = BackupManager(self.jar_handler)
-        self.class_processor = ClassFileProcessor()
-        self.translation_manager = TranslationManager(
-            "", self.jar_handler, self.class_processor, self.backup_manager
-        )
-        self.service = TranslationService(
-            self.jar_handler, self.backup_manager,
-            self.class_processor, self.translation_manager
-        )
+        self.current_jar_id = None
+        self.current_path = None
 
         self.current_item = None
         self.current_preview_file = None
@@ -575,83 +563,89 @@ class JARClassTranslator:
     def update_status(self, msg: str):
         self.status.config(text=msg)
 
-    def _has_translations(self, path: str) -> bool:
-        return self.service.has_translations(path)
+    def _has_translations(self, jar_id: str, path: str) -> bool:
+        return self.service.has_translations(jar_id, path)
 
-    def _on_rename_file(self, old_path: str, new_path: str) -> bool:
-        return self.service.rename_file(old_path, new_path)
+    def _on_rename_file(self, jar_id: str, old_path: str, new_path: str) -> bool:
+        return self.service.rename_file(jar_id, old_path, new_path)
 
-    def _on_backup_file(self, path: str) -> bool:
-        result = self.service.create_backup(path)
+    def _on_backup_file(self, jar_id: str, path: str) -> bool:
+        result = self.service.create_backup(jar_id, path)
         if result:
+            entry = self.workspace_manager.get_entry(jar_id)
+            if entry:
+                backup_path = path + BACKUP_EXT
+                if backup_path in entry.jar_handler.files:
+                    self.workspace_tree.files[jar_id][backup_path] = entry.jar_handler.files[backup_path]
             self.workspace_tree.rebuild_tree()
             self.update_status(f"已创建备份: {path}{BACKUP_EXT}")
         else:
             self.update_status(f"创建备份失败: {path}")
         return result
 
-    def _on_folder_select(self, paths_or_folder, extract: bool = True):
-        folder_path = None
-        if isinstance(paths_or_folder, str):
-            folder_path = paths_or_folder
-            paths = self.jar_handler.get_class_files(paths_or_folder)
-            if not paths:
-                Messagebox.show_info("没有找到class文件", "提示")
-                return
-        else:
-            if paths_or_folder:
-                folder_path = os.path.dirname(paths_or_folder[0])
-            paths = paths_or_folder
-
+    def _on_folder_select(self, jar_id: str, paths: list, extract: bool = False):
+        self.current_jar_id = jar_id
         self.folder_mode = True
-        self.current_folder = folder_path
+        self.current_folder = os.path.dirname(paths[0]) if paths else None
 
         if extract:
-            self.service.extract_strings_from_classes(paths)
+            self.service.extract_strings_from_classes(jar_id, paths)
             self.update_status(f"已提取 {len(paths)} 个class文件的字符串到映射表")
         else:
             self.update_status(f"预览 {len(paths)} 个class文件的字符串")
 
-        self._show_folder_strings(folder_path)
+        self._show_folder_strings(jar_id, self.current_folder)
 
-    def _on_file_select(self, path: str):
+    def _on_file_select(self, jar_id: str, path: str):
         if not path:
             return
+        
+        self.current_jar_id = jar_id
         self.current_preview_file = path
 
-        if self.jar_handler.is_directory(path):
+        entry = self.workspace_manager.get_entry(jar_id)
+        if not entry:
+            return
+
+        if entry.jar_handler.is_directory(path):
             self.folder_mode = True
             self.current_folder = path
             self._set_view_mode('class')
-            class_count = len(self.jar_handler.get_class_files(path))
+            class_count = len(entry.jar_handler.get_class_files(path))
             self.filter_label.config(text=f"文件夹: {path} — {class_count} 个class文件 (右键预览/提取)")
         elif re.search(r'\.class(\.bak)?$', path):
             self.folder_mode = False
             self.current_folder = None
             self._set_view_mode('class')
-            self._preview_class(path)
+            self._preview_class(jar_id, path)
         else:
             self.folder_mode = False
             self.current_folder = None
             self._set_view_mode('preview')
-            self._preview_text(path)
+            self._preview_text(jar_id, path)
 
-    def _show_folder_strings(self, folder_path: str):
+    def _show_folder_strings(self, jar_id: str, folder_path: str):
         if not self.service:
             return
 
-        items = self.service.get_folder_strings(folder_path, extract=False)
+        items = self.service.get_folder_strings(jar_id, folder_path, extract=False)
         data = [item.to_dict() for item in items]
 
         self.const_tree.show_file_column()
         self.const_tree.set_data(data)
         self.filter_label.config(text=f"文件夹: {folder_path} — {len(data)} 条字符串")
-        self.path_label.config(text=folder_path)
+        self.path_label.config(text=f"{jar_id}/{folder_path}")
         self._set_edit_mode()
 
-    def _preview_text(self, path: str):
-        self.path_label.config(text=path)
-        content = self.jar_handler.read_file(path)
+    def _preview_text(self, jar_id: str, path: str):
+        self.path_label.config(text=f"{jar_id}/{path}")
+        
+        entry = self.workspace_manager.get_entry(jar_id)
+        if not entry:
+            self.preview.show_error(f"无法找到JAR文件: {jar_id}")
+            return
+            
+        content = entry.jar_handler.read_file(path)
         if not content:
             self.preview.show_error(f"无法读取文件: {path}")
             self.update_status(f"无法读取文件: {path}")
@@ -663,25 +657,26 @@ class JARClassTranslator:
             self.preview.show_error(f"预览失败: {str(e)}")
             self.update_status(f"预览失败: {e}")
 
-    def _preview_class(self, path: str):
+    def _preview_class(self, jar_id: str, path: str):
         is_bak = path.endswith(BACKUP_EXT)
         file_path = path[:-4] if is_bak else path
         self.current_path = file_path
+        self.current_jar_id = jar_id
 
         self.const_tree.hide_file_column()
         self.const_tree.set_data([])
         self._clear_text()
         self.current_item = None
-        self.path_label.config(text=path)
+        self.path_label.config(text=f"{jar_id}/{path}")
         self.update_status(f"分析: {path}...")
         self._analyze_class()
 
     def _analyze_class(self):
-        if not self.service or not self.current_path:
+        if not self.service or not self.current_path or not self.current_jar_id:
             return
 
         try:
-            items = self.service.get_class_strings(self.current_path)
+            items = self.service.get_class_strings(self.current_jar_id, self.current_path)
             data = [item.to_dict() for item in items]
             self.const_tree.set_data(data)
             self.filter_label.config(text=f"总计: {len(data)} 条字符串")
@@ -754,7 +749,7 @@ class JARClassTranslator:
 
     def _refresh_current_view(self):
         if self.folder_mode:
-            self._show_folder_strings(self.current_folder)
+            self._show_folder_strings(self.current_jar_id, self.current_folder)
         elif self.current_path:
             self._refresh_display()
         self.workspace_tree.rebuild_tree()
@@ -770,7 +765,7 @@ class JARClassTranslator:
             self.update_status("译文不能为空")
             return
 
-        self.service.update_translation(file_path, original, translation)
+        self.service.update_translation(self.current_jar_id, file_path, original, translation)
         self._refresh_current_view()
         self.update_status(f"已应用翻译: {original[:30]}...")
 
@@ -787,13 +782,7 @@ class JARClassTranslator:
             if not self._can_edit_translation():
                 return
 
-        self.service.batch_delete_translations(data_list)
-        affected_files = {item["_file"] for item in data_list}
-        for path in affected_files:
-            info = self.class_processor.get_class_info(path)
-            if not info.translations and info.has_backup and info.has_original:
-                self.backup_manager.rename_file(info.bak_path, info.path)
-                info.has_backup = False
+        self.service.batch_delete_translations(self.current_jar_id, data_list)
 
         if len(data_list) == 1:
             path, original = data_list[0]['_file'], data_list[0]['_original']
@@ -826,50 +815,66 @@ class JARClassTranslator:
         else:
             self._save_text(content)
 
-        self._preview_text(self.current_preview_file)
+        self._preview_text(self.current_jar_id, self.current_preview_file)
 
     def _save_json(self, content: str):
         try:
             data = json.loads(content)
-            self.jar_handler.write_file(self.current_preview_file, json.dumps(data, ensure_ascii=False, indent=4).encode('utf-8'))
+            
+            entry = self.workspace_manager.get_entry(self.current_jar_id)
+            if not entry:
+                Messagebox.show_error(f"无法找到JAR文件: {self.current_jar_id}", "保存失败")
+                return
+            
+            entry.jar_handler.write_file(self.current_preview_file, json.dumps(data, ensure_ascii=False, indent=4).encode('utf-8'))
             self.update_status(f"已保存 JSON: {self.current_preview_file}")
 
-            expected_json = f"{self.jar_name}.json"
+            jar_name = entry.jar_path.split(os.sep)[-1]
+            expected_json = f"{jar_name}.json"
             if self.current_preview_file == expected_json and self.service:
-                self._apply_json_to_classes(data)
+                self._apply_json_to_classes(self.current_jar_id, data)
                 self.workspace_tree.rebuild_tree()
         except json.JSONDecodeError as e:
             Messagebox.show_error(f"JSON 解析失败:\n{str(e)}", "JSON 格式错误")
         except Exception as e:
             Messagebox.show_error(f"保存 JSON 失败:\n{str(e)}", "保存失败")
 
-    def _apply_json_to_classes(self, data: Dict):
+    def _apply_json_to_classes(self, jar_id: str, data: Dict):
+        entry = self.workspace_manager.get_entry(jar_id)
+        if not entry:
+            return
+            
         count = 0
-        for path in self.class_processor.get_all_paths():
-            info = self.class_processor.get_class_info(path)
+        for path in entry.class_processor.get_all_paths():
+            info = entry.class_processor.get_class_info(path)
             info.translations = data.get(path, {})
             if info.translations:
                 if not info.has_backup and info.has_original:
-                    self.backup_manager.create_backup(path)
+                    entry.backup_manager.create_backup(path)
                     info.has_backup = True
             else:
                 if info.has_backup and info.has_original:
-                    self.backup_manager.rename_file(info.bak_path, info.path)
+                    entry.backup_manager.rename_file(info.bak_path, info.path)
                     info.has_backup = False
-            applied = self.service.apply_translations_to_class(path)
+            applied = self.service.apply_translations_to_class(jar_id, path)
             count += applied
-        self.translation_manager._dirty = True
-        self.translation_manager.save_translations()
+        entry.translation_manager._dirty = True
+        entry.translation_manager.save_translations()
         self.update_status(f"已应用 {count} 条翻译到 class 文件")
         if self.current_path:
             self._refresh_display()
 
     def _save_text(self, content: str):
         try:
-            self.jar_handler.write_file(self.current_preview_file, content.encode('utf-8'))
+            entry = self.workspace_manager.get_entry(self.current_jar_id)
+            if not entry:
+                Messagebox.show_error(f"无法找到JAR文件: {self.current_jar_id}", "保存失败")
+                return
+                
+            entry.jar_handler.write_file(self.current_preview_file, content.encode('utf-8'))
             self.update_status(f"已保存: {self.current_preview_file}")
         except UnicodeEncodeError:
-            self.jar_handler.write_file(self.current_preview_file, content.encode('utf-8', errors='ignore'))
+            entry.jar_handler.write_file(self.current_preview_file, content.encode('utf-8', errors='ignore'))
             self.update_status(f"已保存(部分字符丢失): {self.current_preview_file}")
         except Exception as e:
             Messagebox.show_error(f"保存文件失败:\n{str(e)}", "保存失败")
@@ -902,7 +907,7 @@ class JARClassTranslator:
             if not translations:
                 self.update_status("❌ 翻译失败")
                 return
-            self.service.batch_update_translations(data_list, translations)
+            self.service.batch_update_translations(self.current_jar_id, data_list, translations)
 
             if len(data_list) == 1:
                 item = data_list[0]
@@ -921,65 +926,48 @@ class JARClassTranslator:
         thread.start()
 
     def open_jar(self):
-        path = filedialog.askopenfilename(filetypes=[("JAR files", "*.jar")])
-        if not path:
+        paths = filedialog.askopenfilenames(filetypes=[("JAR files", "*.jar")])
+        if not paths:
             return
 
-        self.jar_path = path
-        self.jar_name = os.path.basename(path)
-        self.update_status(f"加载: {self.jar_name}...")
-        self._load_jar(path)
+        self.update_status(f"发现 {len(paths)} 个JAR文件，正在加载...")
 
-    def save_jar(self):
-        self.service.apply_all_translations()
+        for path in paths:
+            jar_name = os.path.basename(path)
+            self.update_status(f"加载: {jar_name}...")
+
+            entry = self.workspace_manager.add_jar(path)
+            self.workspace_tree.add_jar_node(entry.jar_id, entry.jar_name, entry.files)
+            
+            self.update_status(f"加载完成: {len(entry.files)} 个文件")
+
+        self.update_status(f"全部加载完成，共 {len(paths)} 个JAR文件")
+
+    def save_jar(self, jar_id: str = None):
+        if jar_id is None:
+            selected = self.workspace_tree.get_selected_path()
+            if selected:
+                jar_id = selected[0]
+            else:
+                entries = self.workspace_manager.get_all_entries()
+                if entries:
+                    jar_id = entries[0].jar_id
+                else:
+                    Messagebox.show_info("没有可保存的JAR文件", "提示")
+                    return
+
+        entry = self.workspace_manager.get_entry(jar_id)
+        if not entry:
+            Messagebox.show_error(f"未找到JAR文件: {jar_id}", "保存失败")
+            return
+
+        self.service.apply_all_translations(jar_id)
         self.update_status("已应用所有翻译")
-        self.service.save_jar()
-        self.update_status(f"已保存 JAR 文件：{self.jar_path}")
-        if self.jar_path:
-            self.update_status(f"重新加载: {self.jar_name}...")
-            self._load_jar(self.jar_path)
-
-    def _load_jar(self, path: str):
-        self._cleanup()
-        self.temp_dir = tempfile.mkdtemp(prefix=TEMPFILE_PREFIX)
-
-        jar_name = os.path.basename(path)
-        display_name = os.path.splitext(jar_name)[0]
-
-        self.jar_handler = JarFileHandler(self.temp_dir)
-        self.backup_manager = BackupManager(self.jar_handler)
-        self.class_processor = ClassFileProcessor()
-        self.translation_manager = TranslationManager(
-            jar_name,
-            self.jar_handler,
-            self.class_processor,
-            self.backup_manager
-        )
-        self.service = TranslationService(
-            self.jar_handler, self.backup_manager,
-            self.class_processor, self.translation_manager
-        )
-
-        self.service.open_jar(path, self.temp_dir)
-
-        self.workspace_tree.set_translation_checker(self._has_translations)
-        self.workspace_tree.build_tree(display_name, self.jar_handler.files)
-
-        self.const_tree.clear_filters()
-        self.filter_label.config(text="总计: 0 条字符串")
-
-        if self.saved_class_path:
-            target = self.saved_class_path.get('path')
-            if target:
-                self.workspace_tree.expand_path(target)
-                self.workspace_tree.select_path(target)
-            self.saved_class_path = None
-
-        self.update_status(f"加载完成: {len(self.jar_handler.files)} 个文件")
+        self.service.save_jar(jar_id)
+        self.update_status(f"已保存 JAR 文件：{entry.jar_path}")
 
     def _cleanup(self):
-        if self.temp_dir and os.path.exists(self.temp_dir):
-            shutil.rmtree(self.temp_dir)
+        self.service.cleanup()
 
     def on_closing(self):
         self._save_config()

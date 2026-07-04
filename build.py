@@ -14,27 +14,6 @@ def main():
         "--name=mcntools",
         "--icon=icon.ico",
         "--paths=src",
-        "--hidden-import=mcntools",
-        "--hidden-import=mcntools.config",
-        "--hidden-import=mcntools.models",
-        "--hidden-import=mcntools.models.data",
-        "--hidden-import=mcntools.core",
-        "--hidden-import=mcntools.core.translation_service",
-        "--hidden-import=mcntools.core.jar_handler",
-        "--hidden-import=mcntools.core.class_processor",
-        "--hidden-import=mcntools.core.translation_manager",
-        "--hidden-import=mcntools.core.backup_manager",
-        "--hidden-import=mcntools.translators",
-        "--hidden-import=mcntools.translators.base",
-        "--hidden-import=mcntools.translators.google",
-        "--hidden-import=mcntools.translators.deepseek",
-        "--hidden-import=mcntools.translators.factory",
-        "--hidden-import=mcntools.ui",
-        "--hidden-import=mcntools.ui.main_window",
-        "--hidden-import=mcntools.ui.workspace_tree",
-        "--hidden-import=mcntools.ui.treeview",
-        "--hidden-import=mcntools.ui.picker",
-        "--hidden-import=mcntools.ui.preview",
         "--exclude-module=matplotlib",
         "--exclude-module=numpy",
         "--exclude-module=pandas",
@@ -65,10 +44,10 @@ def main():
     if result.returncode == 0:
         print("\n打包成功!")
         print("输出文件: dist/mcntools.exe")
-
         cleanup_files()
     else:
         print("\n打包失败!")
+        print("标准输出:", result.stdout)
         print("错误信息:", result.stderr)
 
 
