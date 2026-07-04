@@ -18,7 +18,7 @@ class ClassFileProcessor:
     def extract_constants(self, path: str, file_data: bytes) -> Dict[int, str]:
         cf = kirjava_load(file_data)
         result = {}
-        for entry, idx in cf.constant_pool._backward_entries.items():
+        for idx, entry in cf.constant_pool:
             if getattr(entry.type, 'name', None) == 'java/lang/String' and entry.value:
                 text = str(entry.value)
                 if text.strip():
@@ -32,12 +32,11 @@ class ClassFileProcessor:
         try:
             cf = kirjava_load(file_data)
             count = 0
-            for entry in cf.constant_pool:
-                if entry and hasattr(entry, 'value') and isinstance(entry.value, str):
-                    text = entry.value
-                    if text in translations:
-                        trans = translations[text]
-                        if trans != text:
+            for idx, entry in cf.constant_pool:
+                if entry:
+                    if entry.value in translations:
+                        trans = translations[entry.value]
+                        if trans != entry:
                             entry.value = trans
                             count += 1
             if count > 0:

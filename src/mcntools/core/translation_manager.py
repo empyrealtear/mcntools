@@ -156,6 +156,14 @@ class TranslationManager:
         if info.has_backup and info.has_original and not info.translations:
             self._generate_from_diff(path)
 
+    def apply_all_translations(self) -> int:
+        count = 0
+        for path in self.class_processor.get_all_paths():
+            info = self.class_processor.get_class_info(path)
+            if info.translations:
+                count += self.apply_to_class(path)
+        return count
+
     def _generate_from_diff(self, path: str) -> None:
         info = self.class_processor.get_class_info(path)
         bak_path = self.backup_manager.get_backup_path(path)

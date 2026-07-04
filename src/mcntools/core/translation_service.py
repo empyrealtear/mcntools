@@ -59,6 +59,9 @@ class TranslationService:
         self.translation_manager.batch_delete(items)
         self.translation_manager.save_translations()
 
+    def apply_all_translations(self) -> int:
+        return self.translation_manager.apply_all_translations()
+
     def apply_translations_to_class(self, path: str) -> int:
         return self.translation_manager.apply_to_class(path)
 

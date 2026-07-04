@@ -931,13 +931,8 @@ class JARClassTranslator:
         self._load_jar(path)
 
     def save_jar(self):
-        if self.current_path:
-            self.saved_class_path = {'path': self.current_path}
-
-        if self.current_path and self.service:
-            self.service.apply_translations_to_class(self.current_path)
-            self.update_status(f"已应用翻译到 {os.path.basename(self.current_path)}")
-
+        self.service.apply_all_translations()
+        self.update_status("已应用所有翻译")
         self.service.save_jar()
         self.update_status(f"已保存 JAR 文件：{self.jar_path}")
         if self.jar_path:
