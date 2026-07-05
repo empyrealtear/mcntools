@@ -9,8 +9,8 @@ from ttkbootstrap.widgets.scrolled import ScrolledText
 from ttkbootstrap.dialogs import Messagebox
 from typing import Dict
 
-from mcntools.config import BACKUP_EXT, CONFIG_FILE, FONT_DEFAULT, FONT_FAMILY, LANGUAGES, ENGINES
-from mcntools.core import TranslationService, WorkspaceManager
+from mcntools.config import CONFIG_FILE, FONT_DEFAULT, FONT_FAMILY, LANGUAGES, ENGINES
+from mcntools.core import TranslationService, WorkspaceManager, BackupManager
 from mcntools.translators import TranslatorFactory
 from mcntools.ui import WorkspaceTree, FilteredTreeview
 from mcntools.ui.preview import FilePreview
@@ -20,6 +20,7 @@ DEFAULT_CONFIG = {
     "window_state": "normal",
     "normal_geometry": "1400x800",
     "show_backup": False,
+    "compare_mode": False,
     "wrap_text": True,
     "regex_flags": [],
     "filter_texts": {},
@@ -38,6 +39,8 @@ class JARClassTranslator:
         self._apply_theme()
         self._init_services()
 
+        self.backup_var = tk.BooleanVar(value=self.config.get("show_backup", DEFAULT_CONFIG['show_backup']))
+        self.compare_mode_var = tk.BooleanVar(value=self.config.get("compare_mode", DEFAULT_CONFIG['compare_mode']))
         target_lang_code = self.config.get('target_lang', DEFAULT_CONFIG['target_lang'])
         target_lang_display = f"{target_lang_code} - {LANGUAGES.get(target_lang_code)}"
         self.target_lang_var = tk.StringVar(value=target_lang_display)
@@ -106,6 +109,7 @@ class JARClassTranslator:
             "window_state": state,
             "normal_geometry": normal_geometry,
             "show_backup": self.workspace_tree.show_backup,
+            "compare_mode": self.workspace_tree.compare_mode,
             "wrap_text": self.word_wrap_var.get(),
             "regex_flags": self.const_tree.get_regex_flags_list(),
             "filter_texts": self.const_tree.get_filter_texts(),
@@ -134,9 +138,11 @@ class JARClassTranslator:
 
     def _restore_state(self):
         self.workspace_tree.show_backup = self.config.get("show_backup", DEFAULT_CONFIG['show_backup'])
+        self.workspace_tree.compare_mode = self.config.get("compare_mode", DEFAULT_CONFIG['compare_mode'])
         self.backup_var.set(self.workspace_tree.show_backup)
+        self.compare_mode_var.set(self.workspace_tree.compare_mode)
         self.word_wrap_var.set(self.config.get("wrap_text", DEFAULT_CONFIG['wrap_text']))
-        self._toggle_word_wrap()
+        # self._toggle_word_wrap()
 
         saved_regex_flags = self.config.get("regex_flags", DEFAULT_CONFIG['regex_flags'])
         self.const_tree.set_regex_flags_list(saved_regex_flags)
@@ -295,7 +301,6 @@ class JARClassTranslator:
         left_header = ttkb.Frame(left_frame)
         left_header.pack(fill=tk.X, pady=(0, 5))
         ttkb.Label(left_header, text="工作空间", font=('Segoe UI', 10, 'bold')).pack(side=tk.LEFT)
-        self.backup_var = tk.BooleanVar(value=False)
 
         self.workspace_tree = WorkspaceTree(
             left_frame,
@@ -304,14 +309,20 @@ class JARClassTranslator:
             on_rename=self._on_rename_file,
             on_backup=self._on_backup_file,
             on_save_jar=self.save_jar,
-            backup_var=self.backup_var
+            backup_var=self.backup_var,
+            compare_mode_var=self.compare_mode_var
         )
 
         self.backup_check = ttkb.Checkbutton(
             left_header, text="显示备份", 
             variable=self.backup_var,
             command=self.workspace_tree.toggle_backup_visibility)
-        self.backup_check.pack(side=tk.RIGHT)
+        self.compare_mode = ttkb.Checkbutton(
+            left_header, text="对照原文", 
+            variable=self.compare_mode_var,
+            command=self.workspace_tree.toggle_compare_mode)
+        self.compare_mode.pack(side=tk.RIGHT, padx=5, pady=5)
+        self.backup_check.pack(side=tk.RIGHT, padx=5, pady=5)
         self.workspace_tree.pack(fill=tk.BOTH, expand=True)
         self.workspace_tree.set_translation_checker(self._has_translations)
 
@@ -574,13 +585,13 @@ class JARClassTranslator:
         if result:
             entry = self.workspace_manager.get_entry(jar_id)
             if entry:
-                backup_path = path + BACKUP_EXT
+                backup_path = BackupManager.create_backup_path(path)
                 if backup_path in entry.jar_handler.files:
                     self.workspace_tree.files[jar_id][backup_path] = entry.jar_handler.files[backup_path]
-            self.workspace_tree.rebuild_tree()
-            self.update_status(f"已创建备份: {path}{BACKUP_EXT}")
-        else:
-            self.update_status(f"创建备份失败: {path}")
+                    self.workspace_tree.rebuild_tree()
+                    self.update_status(f"已创建备份: {backup_path}")
+                    return result
+        self.update_status(f"创建备份失败: {path}")
         return result
 
     def _on_folder_select(self, jar_id: str, paths: list, extract: bool = False):
@@ -613,7 +624,7 @@ class JARClassTranslator:
             self._set_view_mode('class')
             class_count = len(entry.jar_handler.get_class_files(path))
             self.filter_label.config(text=f"文件夹: {path} — {class_count} 个class文件 (右键预览/提取)")
-        elif re.search(r'\.class(\.bak)?$', path):
+        elif BackupManager.is_class_path(path) or BackupManager.is_class_backup_path(path):
             self.folder_mode = False
             self.current_folder = None
             self._set_view_mode('class')
@@ -628,17 +639,18 @@ class JARClassTranslator:
         if not self.service:
             return
 
-        items = self.service.get_folder_strings(jar_id, folder_path, extract=False)
+        items = self.service.get_folder_strings(jar_id, folder_path, extract=False, compare_mode=self.compare_mode_var.get())
         data = [item.to_dict() for item in items]
-
         self.const_tree.show_file_column()
         self.const_tree.set_data(data)
         self.filter_label.config(text=f"文件夹: {folder_path} — {len(data)} 条字符串")
-        self.path_label.config(text=f"{jar_id}/{folder_path}")
+        jar_name = self.workspace_manager.get_entry(jar_id).jar_name
+        self.path_label.config(text=f"{jar_name}/{folder_path}")
         self._set_edit_mode()
 
     def _preview_text(self, jar_id: str, path: str):
-        self.path_label.config(text=f"{jar_id}/{path}")
+        jar_name = self.workspace_manager.get_entry(jar_id).jar_name
+        self.path_label.config(text=f"{jar_name}/{path}")
         
         entry = self.workspace_manager.get_entry(jar_id)
         if not entry:
@@ -658,25 +670,25 @@ class JARClassTranslator:
             self.update_status(f"预览失败: {e}")
 
     def _preview_class(self, jar_id: str, path: str):
-        is_bak = path.endswith(BACKUP_EXT)
-        file_path = path[:-4] if is_bak else path
-        self.current_path = file_path
+        is_bak = BackupManager.is_class_backup_path(path)
+        is_compare_mode = self.compare_mode_var.get()
+        self.current_path = path[:-4] if is_bak and is_compare_mode else path
         self.current_jar_id = jar_id
 
         self.const_tree.hide_file_column()
         self.const_tree.set_data([])
         self._clear_text()
         self.current_item = None
-        self.path_label.config(text=f"{jar_id}/{path}")
-        self.update_status(f"分析: {path}...")
-        self._analyze_class()
+        jar_name = self.workspace_manager.get_entry(jar_id).jar_name
+        self.path_label.config(text=f"{jar_name}/{path}")
+        self._analyze_class(is_compare_mode)
 
-    def _analyze_class(self):
+    def _analyze_class(self, compare_mode: bool = False):
         if not self.service or not self.current_path or not self.current_jar_id:
             return
 
         try:
-            items = self.service.get_class_strings(self.current_jar_id, self.current_path)
+            items = self.service.get_class_strings(self.current_jar_id, self.current_path, compare_mode)
             data = [item.to_dict() for item in items]
             self.const_tree.set_data(data)
             self.filter_label.config(text=f"总计: {len(data)} 条字符串")
@@ -686,13 +698,14 @@ class JARClassTranslator:
 
     def _refresh_display(self):
         if self.current_path:
-            self._analyze_class()
+            self._analyze_class(self.compare_mode_var.get())
 
     def _on_const_select(self, event):
         sel = self.const_tree.selection()
         if not sel:
             self._set_edit_mode()
-            self.path_label.config(text=self.current_preview_file if self.current_preview_file else "")
+            jar_name = self.workspace_manager.get_entry(self.current_jar_id).jar_name
+            self.path_label.config(text=f"{jar_name}/{self.current_preview_file}" if self.current_preview_file else "")
             return
 
         if len(sel) == 1:
@@ -705,13 +718,15 @@ class JARClassTranslator:
                 translation = item['译文'].replace('\\n', '\n').replace('\\r', '\r') or original
                 self._set_text(original, translation)
                 self.current_item = (file_path, original, translation)
-                self.path_label.config(text=file_path)
+                jar_name = self.workspace_manager.get_entry(self.current_jar_id).jar_name
+                self.path_label.config(text=f"{jar_name}/{file_path}")
         else:
             self._set_edit_mode(len(sel))
             self.current_item = None
             data_list = self.const_tree.get_selected_items_data()
             files = list({item['_file'] for item in data_list if item.get('_file')})
-            self.path_label.config(text="; ".join(files) if files else "")
+            jar_name = self.workspace_manager.get_entry(self.current_jar_id).jar_name
+            self.path_label.config(text= f"{jar_name}: " + ";".join(files) if files else "")
 
     def _set_edit_mode(self, batch_count: int = 0):
         if batch_count > 0:

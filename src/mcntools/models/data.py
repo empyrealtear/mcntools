@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Dict
 
-from mcntools.config import BACKUP_EXT
+from mcntools.core.jar_handler import BackupManager
 
 
 @dataclass
@@ -13,7 +13,7 @@ class ClassFileInfo:
     translations: Dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self):
-        self.bak_path = self.path + BACKUP_EXT
+        self.bak_path = BackupManager.create_backup_path(self.path)
 
 
 @dataclass

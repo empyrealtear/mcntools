@@ -3,6 +3,7 @@ import os
 FONT_FAMILY = "Microsoft YaHei"
 FONT_DEFAULT = (FONT_FAMILY, 10)
 BACKUP_EXT = '.bak'
+CLASS_EXT = '.class'
 CONFIG_FILE = os.path.join('.', "config.json")
 WORKSPACE_DIR = os.path.join('.', '.workspace')
 

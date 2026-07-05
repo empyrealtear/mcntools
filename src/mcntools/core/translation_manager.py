@@ -2,10 +2,8 @@ import json
 import os
 from typing import Dict, List
 
-from mcntools.config import BACKUP_EXT
-from mcntools.core.backup_manager import BackupManager
 from mcntools.core.class_processor import ClassFileProcessor
-from mcntools.core.jar_handler import JarFileHandler
+from mcntools.core.jar_handler import JarFileHandler, BackupManager
 
 
 class TranslationManager:
@@ -86,7 +84,7 @@ class TranslationManager:
             info.has_original = True
             info.has_backup = self.backup_manager.has_backup(path)
 
-            load_path = self.backup_manager.get_backup_path(path) if info.has_backup else path
+            load_path = self.backup_manager.create_backup_path(path) if info.has_backup else path
             file_data = self.file_handler.read_file(load_path)
             if not file_data:
                 continue
@@ -125,10 +123,8 @@ class TranslationManager:
     def scan_and_process(self) -> None:
         self.load_translations()
 
-        class_paths = {f for f in self.file_handler.files
-                      if f.endswith('.class') and not f.endswith(BACKUP_EXT)}
-        bak_paths = {f for f in self.file_handler.files
-                    if f.endswith(f'.class{BACKUP_EXT}')}
+        class_paths = {f for f in self.file_handler.files if BackupManager.is_class_path(f)}
+        bak_paths = {f for f in self.file_handler.files if BackupManager.is_class_backup_path(f)}
 
         for path in class_paths:
             self._process_class(path)
@@ -166,7 +162,7 @@ class TranslationManager:
 
     def _generate_from_diff(self, path: str) -> None:
         info = self.class_processor.get_class_info(path)
-        bak_path = self.backup_manager.get_backup_path(path)
+        bak_path = self.backup_manager.create_backup_path(path)
 
         if not self.file_handler.file_exists(bak_path) or not self.file_handler.file_exists(path):
             return

@@ -1,5 +1,4 @@
-from .jar_handler import JarFileHandler
-from .backup_manager import BackupManager
+from .jar_handler import JarFileHandler, BackupManager
 from .class_processor import ClassFileProcessor
 from .translation_manager import TranslationManager
 from .translation_service import TranslationService

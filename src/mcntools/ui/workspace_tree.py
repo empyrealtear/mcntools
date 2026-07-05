@@ -5,14 +5,16 @@ from tkinter import simpledialog
 from ttkbootstrap.dialogs import Messagebox
 from typing import Dict, Optional, Set, Tuple, List
 
-from mcntools.config import BACKUP_EXT, FONT_DEFAULT
+from mcntools.config import FONT_DEFAULT
+from mcntools.core.jar_handler import BackupManager
 
 
 class WorkspaceTree(ttkb.Frame):
 
     def __init__(self, parent, on_file_select=None,
                  on_folder_select=None, on_rename=None,
-                 on_backup=None, on_save_jar=None, backup_var=None):
+                 on_backup=None, on_save_jar=None,
+                 backup_var=None, compare_mode_var=None):
         super().__init__(parent)
         self.on_file_select = on_file_select
         self.on_folder_select = on_folder_select
@@ -25,6 +27,7 @@ class WorkspaceTree(ttkb.Frame):
         self.show_backup = False
         self.translation_checker = None
         self.backup_var = backup_var
+        self.compare_mode_var = compare_mode_var
 
         self._init_ui()
         self._init_context_menus()
@@ -71,6 +74,12 @@ class WorkspaceTree(ttkb.Frame):
         self.show_backup = not self.show_backup
         if self.backup_var:
             self.backup_var.set(self.show_backup)
+        self.rebuild_tree()
+        
+    def toggle_compare_mode(self):
+        self.compare_mode = not self.compare_mode
+        if self.compare_mode_var:
+            self.compare_mode_var.set(self.compare_mode)
         self.rebuild_tree()
 
     def _on_select(self, event):
@@ -211,8 +220,10 @@ class WorkspaceTree(ttkb.Frame):
     def _get_class_files(self, jar_id: str, path: str) -> list:
         jar_files = self.files.get(jar_id, {})
         if path in jar_files:
-            return [path] if path.endswith('.class') and not path.endswith(BACKUP_EXT) else []
-        return [p for p in jar_files if p.startswith(path + '/') and p.endswith('.class') and not p.endswith(BACKUP_EXT)]
+            return [path] if path.endswith('.class') and not BackupManager.is_backup_path(path) else []
+        return [p for p in jar_files if p.startswith(path + '/')
+                    and BackupManager.is_class_path(p)
+                    and not BackupManager.is_class_backup_path(p)]
 
     def _is_directory(self, jar_id: str, path: str) -> bool:
         jar_files = self.files.get(jar_id, {})
@@ -316,7 +327,7 @@ class WorkspaceTree(ttkb.Frame):
 
         root = self.tree.insert("", "end", text=jar_name, values=(jar_id,), open=True)
 
-        filtered = [f for f in files if not f.endswith(BACKUP_EXT) or self.show_backup]
+        filtered = [f for f in files if not BackupManager.is_backup_path(f) or self.show_backup]
         tree = {}
         for path in filtered:
             parts = path.split('/')
@@ -331,9 +342,9 @@ class WorkspaceTree(ttkb.Frame):
                 if children is None:
                     file_path = self._build_path(parent, name)
                     tags = ('file',)
-                    if file_path.endswith(BACKUP_EXT):
+                    if BackupManager.is_backup_path(file_path):
                         tags = ('file', 'backup')
-                    if self.translation_checker and file_path.endswith('.class') and not file_path.endswith(BACKUP_EXT):
+                    if self.translation_checker and file_path.endswith('.class') and not BackupManager.is_backup_path(file_path):
                         if self.translation_checker(jar_id, file_path):
                             tags = ('file', 'translated')
                     self.tree.insert(parent, "end", text=name, tags=tags)
@@ -359,7 +370,7 @@ class WorkspaceTree(ttkb.Frame):
 
             root = self.tree.insert("", "end", text=jar_name, values=(jar_id,), open=True)
 
-            filtered = [f for f in files if not f.endswith(BACKUP_EXT) or self.show_backup]
+            filtered = [f for f in files if not BackupManager.is_backup_path(f) or self.show_backup]
             tree = {}
             for path in filtered:
                 parts = path.split('/')
@@ -374,9 +385,9 @@ class WorkspaceTree(ttkb.Frame):
                     if children is None:
                         file_path = self._build_path(parent, name)
                         tags = ('file',)
-                        if file_path.endswith(BACKUP_EXT):
+                        if BackupManager.is_backup_path(file_path):
                             tags = ('file', 'backup')
-                        if self.translation_checker and file_path.endswith('.class') and not file_path.endswith(BACKUP_EXT):
+                        if self.translation_checker and file_path.endswith('.class') and not BackupManager.is_backup_path(file_path):
                             if self.translation_checker(jar_id, file_path):
                                 tags = ('file', 'translated')
                         self.tree.insert(parent, "end", text=name, tags=tags)

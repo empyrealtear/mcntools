@@ -3,9 +3,8 @@ import shutil
 from typing import Dict, List, Optional
 
 from mcntools.config import WORKSPACE_DIR
-from mcntools.core.backup_manager import BackupManager
 from mcntools.core.class_processor import ClassFileProcessor
-from mcntools.core.jar_handler import JarFileHandler
+from mcntools.core.jar_handler import JarFileHandler, BackupManager
 from mcntools.core.translation_manager import TranslationManager
 from mcntools.core.jar_entry import JarEntry
 

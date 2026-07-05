@@ -1,6 +1,6 @@
 from typing import Dict, List, Optional
 
-from mcntools.config import BACKUP_EXT
+from mcntools.core.jar_handler import BackupManager
 from mcntools.core.workspace_manager import WorkspaceManager
 from mcntools.models.data import TranslationItem
 
@@ -73,13 +73,13 @@ class TranslationService:
             return 0
         return entry.translation_manager.apply_to_class(path)
 
-    def get_class_strings(self, jar_id: str, path: str) -> List[TranslationItem]:
+    def get_class_strings(self, jar_id: str, path: str, compare_mode: bool = False) -> List[TranslationItem]:
         entry = self.workspace_manager.get_entry(jar_id)
         if not entry:
             return []
         
         info = entry.class_processor.get_class_info(path)
-        load_path = entry.backup_manager.get_backup_path(path) if info.has_backup else path
+        load_path = BackupManager.create_backup_path(path) if info.has_backup and compare_mode else path
 
         file_data = entry.jar_handler.read_file(load_path)
         if not file_data:
@@ -98,7 +98,7 @@ class TranslationService:
             for idx, text in strings.items()
         ]
 
-    def get_folder_strings(self, jar_id: str, folder_path: str, extract: bool = False) -> List[TranslationItem]:
+    def get_folder_strings(self, jar_id: str, folder_path: str, extract: bool = False, compare_mode: bool = False) -> List[TranslationItem]:
         entry = self.workspace_manager.get_entry(jar_id)
         if not entry:
             return []
@@ -110,7 +110,7 @@ class TranslationService:
             self.extract_strings_from_classes(jar_id, class_files)
 
         for path in class_files:
-            items.extend(self.get_class_strings(jar_id, path))
+            items.extend(self.get_class_strings(jar_id, path, compare_mode))
         return items
 
     def rename_file(self, jar_id: str, old_path: str, new_path: str) -> bool:
@@ -121,11 +121,11 @@ class TranslationService:
         if not entry.backup_manager.rename_file(old_path, new_path):
             return False
 
-        old_assoc = old_path + BACKUP_EXT
+        old_assoc = BackupManager.create_backup_path(old_path)
         if entry.jar_handler.file_exists(old_assoc):
-            entry.backup_manager.rename_file(old_assoc, new_path + BACKUP_EXT)
+            entry.backup_manager.rename_file(old_assoc, BackupManager.create_backup_path(new_path))
 
-        new_bak_path = entry.backup_manager.get_backup_path(new_path)
+        new_bak_path = entry.backup_manager.create_backup_path(new_path)
         entry.class_processor.rename_class(old_path, new_path, new_bak_path)
         return True
 
