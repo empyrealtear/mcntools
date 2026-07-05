@@ -326,7 +326,10 @@ class WorkspaceTree(ttkb.Frame):
         self._jar_id_map[jar_name] = jar_id
 
         root = self.tree.insert("", "end", text=jar_name, values=(jar_id,), open=True)
+        self._build_tree_node(root, jar_id, files)
 
+    def _build_tree_node(self, root, jar_id: str, files: Dict[str, str]):
+        """构建JAR节点的文件树"""
         filtered = [f for f in files if not BackupManager.is_backup_path(f) or self.show_backup]
         tree = {}
         for path in filtered:
@@ -369,33 +372,7 @@ class WorkspaceTree(ttkb.Frame):
                     break
 
             root = self.tree.insert("", "end", text=jar_name, values=(jar_id,), open=True)
-
-            filtered = [f for f in files if not BackupManager.is_backup_path(f) or self.show_backup]
-            tree = {}
-            for path in filtered:
-                parts = path.split('/')
-                cur = tree
-                for p in parts[:-1]:
-                    cur = cur.setdefault(p, {})
-                if parts[-1]:
-                    cur[parts[-1]] = None
-
-            def add(parent, data):
-                for name, children in sorted(data.items()):
-                    if children is None:
-                        file_path = self._build_path(parent, name)
-                        tags = ('file',)
-                        if BackupManager.is_backup_path(file_path):
-                            tags = ('file', 'backup')
-                        if self.translation_checker and file_path.endswith('.class') and not BackupManager.is_backup_path(file_path):
-                            if self.translation_checker(jar_id, file_path):
-                                tags = ('file', 'translated')
-                        self.tree.insert(parent, "end", text=name, tags=tags)
-                    else:
-                        node = self.tree.insert(parent, "end", text=name, tags=('dir',))
-                        add(node, children)
-
-            add(root, tree)
+            self._build_tree_node(root, jar_id, files)
 
         for jar_id, path in expanded_paths:
             self._expand_path_no_select(jar_id, path)

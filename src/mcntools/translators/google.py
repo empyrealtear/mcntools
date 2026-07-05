@@ -76,6 +76,3 @@ class GoogleTranslator(BaseTranslator):
                 result[text] = text
 
         return result
-
-    def get_status(self) -> Dict:
-        return super().get_status()

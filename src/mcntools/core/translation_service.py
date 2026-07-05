@@ -2,7 +2,8 @@ from typing import Dict, List, Optional
 
 from mcntools.core.jar_handler import BackupManager
 from mcntools.core.workspace_manager import WorkspaceManager
-from mcntools.models.data import TranslationItem
+from mcntools.core.jar_entry import JarEntry
+from mcntools.core.translation_manager import TranslationItem
 
 
 class TranslationService:
@@ -149,10 +150,10 @@ class TranslationService:
     def remove_jar(self, jar_id: str) -> bool:
         return self.workspace_manager.remove_jar(jar_id)
 
-    def get_entry(self, jar_id: str) -> Optional:
+    def get_entry(self, jar_id: str) -> Optional[JarEntry]:
         return self.workspace_manager.get_entry(jar_id)
 
-    def get_all_entries(self) -> List:
+    def get_all_entries(self) -> List[JarEntry]:
         return self.workspace_manager.get_all_entries()
 
     def cleanup(self):

@@ -78,6 +78,3 @@ class DeepSeekTranslator(BaseTranslator):
         except Exception as e:
             print(f"解析 DeepSeek 响应失败: {e}")
             return {text: text for text in texts}
-
-    def get_status(self) -> Dict:
-        return super().get_status()

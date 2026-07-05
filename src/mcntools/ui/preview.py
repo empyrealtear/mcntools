@@ -5,7 +5,7 @@ import tkinter.font as tkfont
 import ttkbootstrap as ttkb
 from typing import Optional, List, Dict, Any
 
-from mcntools.config import FONT_DEFAULT
+from mcntools.config import FONT_DEFAULT, IMAGE_EXTS, JSON_EXT
 
 try:
     from PIL import Image, ImageTk
@@ -13,41 +13,8 @@ try:
 except ImportError:
     PIL_AVAILABLE = False
 
-IMAGE_EXTS = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.ico'}
-JSON_EXTS = {'.json'}
 
 
-def _theme_colors():
-    try:
-        return ttkb.Style().colors
-    except Exception:
-        return None
-
-
-def _decode_text(content: bytes) -> Optional[str]:
-    for enc in ('utf-8', 'gbk', 'latin-1'):
-        try:
-            return content.decode(enc)
-        except UnicodeDecodeError:
-            continue
-    return None
-
-
-def _hex_dump(content: bytes, limit: int = 4096) -> str:
-    text = "无法解码为文本，显示为二进制数据:\n\n"
-    for i in range(0, min(len(content), limit), 16):
-        chunk = content[i:i + 16]
-        hex_part = ' '.join(f'{b:02x}' for b in chunk)
-        ascii_part = ''.join(chr(b) if 32 <= b < 127 else '.' for b in chunk)
-        text += f'{i:08x}: {hex_part:<48} {ascii_part}\n'
-    if len(content) > limit:
-        text += f'\n... (显示前{limit}字节，共{len(content)}字节)'
-    return text
-
-
-def _looks_like_json(text: str) -> bool:
-    s = text.lstrip()
-    return s.startswith(('{', '[')) and s.rstrip().endswith(('}', ']'))
 
 
 class JSONPreviewNode:
@@ -65,6 +32,13 @@ class JSONPreviewNode:
 
 class TextPreview(ttkb.Frame):
     """文本/JSON 预览：行号、JSON 高亮、JSON 折叠"""
+
+    @staticmethod
+    def _theme_colors():
+        try:
+            return ttkb.Style().colors
+        except Exception:
+            return None
 
     def __init__(self, master, font=FONT_DEFAULT, json_mode: bool = False, readonly: bool = False, **kw):
         super().__init__(master, **kw)
@@ -159,7 +133,7 @@ class TextPreview(ttkb.Frame):
         return None
 
     def apply_theme(self):
-        c = _theme_colors()
+        c = self._theme_colors()
         if c:
             self.text.tag_config('json_key', foreground=c.fg)
             self.text.tag_config('json_string', foreground=c.danger)
@@ -486,6 +460,13 @@ class TextPreview(ttkb.Frame):
 class ImagePreview(ttkb.Frame):
     """图片预览：自适应窗口 + 缩放"""
 
+    @staticmethod
+    def _theme_colors():
+        try:
+            return ttkb.Style().colors
+        except Exception:
+            return None
+
     def __init__(self, master, **kw):
         super().__init__(master, **kw)
         self._image = None
@@ -509,7 +490,7 @@ class ImagePreview(ttkb.Frame):
         self.apply_theme()
 
     def apply_theme(self):
-        c = _theme_colors()
+        c = self._theme_colors()
         bg = c.bg if c is not None else '#ffffff'
         self.canvas.config(bg=bg)
 
@@ -591,6 +572,32 @@ class ImagePreview(ttkb.Frame):
 class FilePreview(ttkb.Frame):
     """统一文件预览：根据文件类型切换 文本/JSON/图片"""
 
+    @staticmethod
+    def _decode_text(content: bytes) -> Optional[str]:
+        for enc in ('utf-8', 'gbk', 'latin-1'):
+            try:
+                return content.decode(enc)
+            except UnicodeDecodeError:
+                continue
+        return None
+
+    @staticmethod
+    def _hex_dump(content: bytes, limit: int = 4096) -> str:
+        text = "无法解码为文本，显示为二进制数据:\n\n"
+        for i in range(0, min(len(content), limit), 16):
+            chunk = content[i:i + 16]
+            hex_part = ' '.join(f'{b:02x}' for b in chunk)
+            ascii_part = ''.join(chr(b) if 32 <= b < 127 else '.' for b in chunk)
+            text += f'{i:08x}: {hex_part:<48} {ascii_part}\n'
+        if len(content) > limit:
+            text += f'\n... (显示前{limit}字节，共{len(content)}字节)'
+        return text
+
+    @staticmethod
+    def _looks_like_json(text: str) -> bool:
+        s = text.lstrip()
+        return s.startswith(('{', '[')) and s.rstrip().endswith(('}', ']'))
+
     def __init__(self, master, font=FONT_DEFAULT, **kw):
         super().__init__(master, **kw)
         self.font = font
@@ -604,17 +611,17 @@ class FilePreview(ttkb.Frame):
             self._widget.set_content(content)
             return
 
-        text = _decode_text(content)
+        text = self._decode_text(content)
         if text is not None:
-            if ext in JSON_EXTS or _looks_like_json(text):
+            if ext == JSON_EXT or self._looks_like_json(text):
                 self._switch('json')
-                self._widget.set_content(self._pretty_json(text) if ext in JSON_EXTS else text)
+                self._widget.set_content(self._pretty_json(text) if ext == JSON_EXT else text)
             else:
                 self._switch('text')
                 self._widget.set_content(text)
         else:
             self._switch('text')
-            self._widget.set_content(_hex_dump(content))
+            self._widget.set_content(self._hex_dump(content))
 
     @staticmethod
     def _pretty_json(text: str) -> str:

@@ -1,13 +1,12 @@
 import json
 import os
-import re
 import threading
 import tkinter as tk
 import ttkbootstrap as ttkb
 from tkinter import filedialog
 from ttkbootstrap.widgets.scrolled import ScrolledText
 from ttkbootstrap.dialogs import Messagebox
-from typing import Dict
+from typing import Dict, List, Optional
 
 from mcntools.config import CONFIG_FILE, FONT_DEFAULT, FONT_FAMILY, LANGUAGES, ENGINES
 from mcntools.core import TranslationService, WorkspaceManager, BackupManager
@@ -20,7 +19,7 @@ DEFAULT_CONFIG = {
     "window_state": "normal",
     "normal_geometry": "1400x800",
     "show_backup": False,
-    "compare_mode": False,
+    "compare_mode": True,
     "wrap_text": True,
     "regex_flags": [],
     "filter_texts": {},
@@ -41,6 +40,7 @@ class JARClassTranslator:
 
         self.backup_var = tk.BooleanVar(value=self.config.get("show_backup", DEFAULT_CONFIG['show_backup']))
         self.compare_mode_var = tk.BooleanVar(value=self.config.get("compare_mode", DEFAULT_CONFIG['compare_mode']))
+        
         target_lang_code = self.config.get('target_lang', DEFAULT_CONFIG['target_lang'])
         target_lang_display = f"{target_lang_code} - {LANGUAGES.get(target_lang_code)}"
         self.target_lang_var = tk.StringVar(value=target_lang_display)
@@ -142,8 +142,7 @@ class JARClassTranslator:
         self.backup_var.set(self.workspace_tree.show_backup)
         self.compare_mode_var.set(self.workspace_tree.compare_mode)
         self.word_wrap_var.set(self.config.get("wrap_text", DEFAULT_CONFIG['wrap_text']))
-        # self._toggle_word_wrap()
-
+        
         saved_regex_flags = self.config.get("regex_flags", DEFAULT_CONFIG['regex_flags'])
         self.const_tree.set_regex_flags_list(saved_regex_flags)
 
@@ -159,6 +158,7 @@ class JARClassTranslator:
         self.current_engine = engine
         engine_display = self._get_engine_display(engine)
         self.engine_var.set(engine_display)
+        self._set_buttons_state("normal" if self.workspace_tree.compare_mode else "disabled")
 
     def _init_menu(self):
         menubar = tk.Menu(self.root)
@@ -166,8 +166,12 @@ class JARClassTranslator:
 
         file_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="文件", menu=file_menu)
-        file_menu.add_command(label="打开 JAR", accelerator="Ctrl+O", command=self.open_jar)
-        file_menu.add_command(label="保存 JAR", accelerator="Ctrl+S", command=self.save_jar)
+        file_menu.add_command(
+            label="打开 JAR", accelerator="Ctrl+O",
+            command=lambda: self.open_jar(use_dialog=True))
+        file_menu.add_command(
+            label="保存 JAR", accelerator="Ctrl+S",
+            command=lambda: self.save_jar(save_all=True))
         file_menu.add_separator()
         file_menu.add_command(label="退出", command=self.root.destroy)
 
@@ -223,57 +227,13 @@ class JARClassTranslator:
         for theme, label in themes.items():
             theme_menu.add_radiobutton(label=label, variable=self.theme_var, value=theme, command=self._change_theme)
 
-        self._update_menu_colors(menubar)
         self.menubar = menubar
-
-    def _update_menu_colors(self, menubar):
-        style = ttkb.Style()
-        try:
-            bg = style.lookup('TMenu', 'background')
-            fg = style.lookup('TMenu', 'foreground')
-        except:
-            bg, fg = None, None
-        dark_themes = {'darkly', 'superhero', 'solar', 'cyborg', 'vapor'}
-        is_dark = self.theme_var.get() in dark_themes
-        if not bg:
-            bg = '#2b2b2b' if is_dark else '#ffffff'
-        if not fg:
-            fg = '#ffffff' if is_dark else '#000000'
-        menubar.config(bg=bg, fg=fg)
-        for menu in menubar.winfo_children():
-            if isinstance(menu, tk.Menu):
-                menu.config(bg=bg, fg=fg)
-                for submenu in menu.winfo_children():
-                    if isinstance(submenu, tk.Menu):
-                        submenu.config(bg=bg, fg=fg)
-
-    def _update_workspace_menu_colors(self):
-        style = ttkb.Style()
-        bg = style.lookup('TFrame', 'background')
-        fg = style.lookup('TLabel', 'foreground')
-        
-        menus = [
-            self.workspace_tree.file_context_menu,
-            self.workspace_tree.folder_context_menu
-        ]
-        
-        for menu in menus:
-            menu.config(bg=bg, fg=fg)
-            for submenu in menu.winfo_children():
-                if isinstance(submenu, tk.Menu):
-                    submenu.config(bg=bg, fg=fg)
 
     def _change_theme(self):
         self.current_theme = self.theme_var.get()
         
         style = ttkb.Style()
         style.theme_use(self.current_theme)
-        
-        if getattr(self, 'menubar', None):
-            self._update_menu_colors(self.menubar)
-        if getattr(self, 'workspace_tree', None):
-            self._update_workspace_menu_colors()
-            
         self.root.update_idletasks()
         self.root.update()
         if getattr(self, 'const_tree', None):
@@ -285,8 +245,8 @@ class JARClassTranslator:
         self.preview.set_wrap(self.word_wrap_var.get())
 
     def _bind_shortcuts(self):
-        self.root.bind('<Control-o>', lambda e: self.open_jar())
-        self.root.bind('<Control-s>', lambda e: self.save_jar())
+        self.root.bind('<Control-o>', lambda e: self.open_jar(use_dialog=True))
+        self.root.bind('<Control-s>', lambda e: self.save_jar(save_all=True))
         self.root.bind('<Control-t>', lambda e: self._translate_selected())
 
     def _init_ui(self):
@@ -320,7 +280,7 @@ class JARClassTranslator:
         self.compare_mode = ttkb.Checkbutton(
             left_header, text="对照原文", 
             variable=self.compare_mode_var,
-            command=self.workspace_tree.toggle_compare_mode)
+            command=self._on_compare_mode_change)
         self.compare_mode.pack(side=tk.RIGHT, padx=5, pady=5)
         self.backup_check.pack(side=tk.RIGHT, padx=5, pady=5)
         self.workspace_tree.pack(fill=tk.BOTH, expand=True)
@@ -345,17 +305,9 @@ class JARClassTranslator:
         self.content_frame.pack(fill=tk.BOTH, expand=True)
 
         self._init_class_mode()
-
         self._init_preview_mode()
-
         self._set_view_mode('class')
-
-        self.status = ttkb.Label(
-            self.root,
-            text="就绪 | Ctrl+T 翻译选中",
-            anchor=tk.W,
-            padding=(10, 5)
-        )
+        self.status = ttkb.Label(self.root, text="就绪 | Ctrl+T 翻译选中", anchor=tk.W, padding=(10, 5))
         self.status.pack(side=tk.BOTTOM, fill=tk.X)
 
         self.root.after(100, self._set_pane_ratio)
@@ -370,15 +322,7 @@ class JARClassTranslator:
         tree_container = ttkb.Frame(const_frame)
         tree_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        columns = ('文件', '索引', '原文', '译文')
-        self.const_tree = FilteredTreeview(tree_container, columns=columns, height=15).apply_zebra_stripes()
-        self.const_tree.heading('文件', text='文件')
-        self.const_tree.heading('索引', text='索引')
-        self.const_tree.heading('原文', text='原文')
-        self.const_tree.heading('译文', text='译文')
-        self.const_tree.column('索引', width=55, anchor='center', stretch=False)
-        self.const_tree.column('原文', width=400)
-        self.const_tree.column('译文', width=400)
+        self.const_tree = FilteredTreeview(tree_container, height=15, on_select=self._on_const_select).apply_zebra_stripes()
 
         scroll_x = ttkb.Scrollbar(tree_container, orient="horizontal", command=self.const_tree.xview)
         scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
@@ -386,7 +330,6 @@ class JARClassTranslator:
         scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
         self.const_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.const_tree.configure(yscrollcommand=scroll_y.set, xscrollcommand=scroll_x.set)
-        self.const_tree.bind('<<TreeviewSelect>>', self._on_const_select)
 
         edit_frame = ttkb.LabelFrame(self.class_paned, text="编辑")
         self.class_paned.add(edit_frame, weight=1)
@@ -471,7 +414,7 @@ class JARClassTranslator:
         if hasattr(self, 'engine_combo'):
             if status['available']:
                 self.engine_combo.config(bootstyle="success")
-                self.translate_btn.config(state="normal")
+                self.translate_btn.config(state="normal" if self.compare_mode_var.get() else 'disabled')
             else:
                 self.engine_combo.config(bootstyle="danger")
                 self.translate_btn.config(state="disabled")
@@ -577,13 +520,22 @@ class JARClassTranslator:
     def _has_translations(self, jar_id: str, path: str) -> bool:
         return self.service.has_translations(jar_id, path)
 
+    def _get_entry(self, jar_id: str):
+        """获取JarEntry，简化重复调用"""
+        return self.workspace_manager.get_entry(jar_id)
+
+    def _get_jar_name(self, jar_id: str) -> str:
+        """获取JAR名称，简化重复调用"""
+        entry = self._get_entry(jar_id)
+        return entry.jar_name if entry else jar_id
+
     def _on_rename_file(self, jar_id: str, old_path: str, new_path: str) -> bool:
         return self.service.rename_file(jar_id, old_path, new_path)
 
     def _on_backup_file(self, jar_id: str, path: str) -> bool:
         result = self.service.create_backup(jar_id, path)
         if result:
-            entry = self.workspace_manager.get_entry(jar_id)
+            entry = self._get_entry(jar_id)
             if entry:
                 backup_path = BackupManager.create_backup_path(path)
                 if backup_path in entry.jar_handler.files:
@@ -614,7 +566,7 @@ class JARClassTranslator:
         self.current_jar_id = jar_id
         self.current_preview_file = path
 
-        entry = self.workspace_manager.get_entry(jar_id)
+        entry = self._get_entry(jar_id)
         if not entry:
             return
 
@@ -638,21 +590,21 @@ class JARClassTranslator:
     def _show_folder_strings(self, jar_id: str, folder_path: str):
         if not self.service:
             return
-
-        items = self.service.get_folder_strings(jar_id, folder_path, extract=False, compare_mode=self.compare_mode_var.get())
+        is_compare_mode = self.compare_mode_var.get()
+        items = self.service.get_folder_strings(jar_id, folder_path, extract=False, compare_mode=is_compare_mode)
         data = [item.to_dict() for item in items]
-        self.const_tree.show_file_column()
+        self.const_tree.set_view_mode(show_file_column=True, show_translation_column=is_compare_mode)
         self.const_tree.set_data(data)
         self.filter_label.config(text=f"文件夹: {folder_path} — {len(data)} 条字符串")
-        jar_name = self.workspace_manager.get_entry(jar_id).jar_name
+        jar_name = self._get_jar_name(jar_id)
         self.path_label.config(text=f"{jar_name}/{folder_path}")
         self._set_edit_mode()
 
     def _preview_text(self, jar_id: str, path: str):
-        jar_name = self.workspace_manager.get_entry(jar_id).jar_name
+        jar_name = self._get_jar_name(jar_id)
         self.path_label.config(text=f"{jar_name}/{path}")
         
-        entry = self.workspace_manager.get_entry(jar_id)
+        entry = self._get_entry(jar_id)
         if not entry:
             self.preview.show_error(f"无法找到JAR文件: {jar_id}")
             return
@@ -660,7 +612,6 @@ class JARClassTranslator:
         content = entry.jar_handler.read_file(path)
         if not content:
             self.preview.show_error(f"无法读取文件: {path}")
-            self.update_status(f"无法读取文件: {path}")
             return
         try:
             self.preview.set_content(path, content)
@@ -675,11 +626,11 @@ class JARClassTranslator:
         self.current_path = path[:-4] if is_bak and is_compare_mode else path
         self.current_jar_id = jar_id
 
-        self.const_tree.hide_file_column()
+        self.const_tree.set_view_mode(show_file_column=False, show_translation_column=is_compare_mode)
         self.const_tree.set_data([])
         self._clear_text()
         self.current_item = None
-        jar_name = self.workspace_manager.get_entry(jar_id).jar_name
+        jar_name = self._get_jar_name(jar_id)
         self.path_label.config(text=f"{jar_name}/{path}")
         self._analyze_class(is_compare_mode)
 
@@ -696,36 +647,40 @@ class JARClassTranslator:
         except Exception as e:
             self.update_status(f"加载失败: {e}")
 
+    def _on_compare_mode_change(self):
+        """对照原文模式切换处理"""
+        self.workspace_tree.toggle_compare_mode()
+        is_compare_mode = self.compare_mode_var.get()
+        self._set_buttons_state("normal" if is_compare_mode else "disabled")
+        self._update_translator_status()
+        self._refresh_display()
+
     def _refresh_display(self):
         if self.current_path:
             self._analyze_class(self.compare_mode_var.get())
 
-    def _on_const_select(self, event):
-        sel = self.const_tree.selection()
-        if not sel:
+    def _on_const_select(self, data_list):
+        if not data_list:
             self._set_edit_mode()
-            jar_name = self.workspace_manager.get_entry(self.current_jar_id).jar_name
+            jar_name = self._get_jar_name(self.current_jar_id)
             self.path_label.config(text=f"{jar_name}/{self.current_preview_file}" if self.current_preview_file else "")
             return
 
-        if len(sel) == 1:
+        if len(data_list) == 1:
             self._set_edit_mode()
-            data_list = self.const_tree.get_selected_items_data()
-            if data_list:
-                item = data_list[0]
-                file_path = item['_file']
-                original = item['_original']
-                translation = item['译文'].replace('\\n', '\n').replace('\\r', '\r') or original
-                self._set_text(original, translation)
-                self.current_item = (file_path, original, translation)
-                jar_name = self.workspace_manager.get_entry(self.current_jar_id).jar_name
-                self.path_label.config(text=f"{jar_name}/{file_path}")
+            item = data_list[0]
+            file_path = item['_file']
+            original = item['_original']
+            translation = item['译文'].replace('\\n', '\n').replace('\\r', '\r') or original
+            self._set_text(original, translation)
+            self.current_item = (file_path, original, translation)
+            jar_name = self._get_jar_name(self.current_jar_id)
+            self.path_label.config(text=f"{jar_name}/{file_path}")
         else:
-            self._set_edit_mode(len(sel))
+            self._set_edit_mode(len(data_list))
             self.current_item = None
-            data_list = self.const_tree.get_selected_items_data()
             files = list({item['_file'] for item in data_list if item.get('_file')})
-            jar_name = self.workspace_manager.get_entry(self.current_jar_id).jar_name
+            jar_name = self._get_jar_name(self.current_jar_id)
             self.path_label.config(text= f"{jar_name}: " + ";".join(files) if files else "")
 
     def _set_edit_mode(self, batch_count: int = 0):
@@ -836,7 +791,7 @@ class JARClassTranslator:
         try:
             data = json.loads(content)
             
-            entry = self.workspace_manager.get_entry(self.current_jar_id)
+            entry = self._get_entry(self.current_jar_id)
             if not entry:
                 Messagebox.show_error(f"无法找到JAR文件: {self.current_jar_id}", "保存失败")
                 return
@@ -844,8 +799,7 @@ class JARClassTranslator:
             entry.jar_handler.write_file(self.current_preview_file, json.dumps(data, ensure_ascii=False, indent=4).encode('utf-8'))
             self.update_status(f"已保存 JSON: {self.current_preview_file}")
 
-            jar_name = entry.jar_path.split(os.sep)[-1]
-            expected_json = f"{jar_name}.json"
+            expected_json = f"{entry.jar_name}.json"
             if self.current_preview_file == expected_json and self.service:
                 self._apply_json_to_classes(self.current_jar_id, data)
                 self.workspace_tree.rebuild_tree()
@@ -855,7 +809,7 @@ class JARClassTranslator:
             Messagebox.show_error(f"保存 JSON 失败:\n{str(e)}", "保存失败")
 
     def _apply_json_to_classes(self, jar_id: str, data: Dict):
-        entry = self.workspace_manager.get_entry(jar_id)
+        entry = self._get_entry(jar_id)
         if not entry:
             return
             
@@ -881,7 +835,7 @@ class JARClassTranslator:
 
     def _save_text(self, content: str):
         try:
-            entry = self.workspace_manager.get_entry(self.current_jar_id)
+            entry = self._get_entry(self.current_jar_id)
             if not entry:
                 Messagebox.show_error(f"无法找到JAR文件: {self.current_jar_id}", "保存失败")
                 return
@@ -940,46 +894,37 @@ class JARClassTranslator:
         thread.daemon = True
         thread.start()
 
-    def open_jar(self):
-        paths = filedialog.askopenfilenames(filetypes=[("JAR files", "*.jar")])
-        if not paths:
-            return
+    def open_jar(self, paths: Optional[List[str]] = None, use_dialog: bool = False):
+        if use_dialog:
+            paths = filedialog.askopenfilenames(filetypes=[("JAR files", "*.jar")])
+        
+        if paths:
+            for path in paths:
+                entry = self.workspace_manager.add_jar(path)
+                self.workspace_tree.add_jar_node(entry.jar_id, entry.jar_name, entry.files)
+            self.update_status(f"全部加载完成，共 {len(paths)} 个JAR文件")
 
-        self.update_status(f"发现 {len(paths)} 个JAR文件，正在加载...")
-
-        for path in paths:
-            jar_name = os.path.basename(path)
-            self.update_status(f"加载: {jar_name}...")
-
-            entry = self.workspace_manager.add_jar(path)
-            self.workspace_tree.add_jar_node(entry.jar_id, entry.jar_name, entry.files)
-            
-            self.update_status(f"加载完成: {len(entry.files)} 个文件")
-
-        self.update_status(f"全部加载完成，共 {len(paths)} 个JAR文件")
-
-    def save_jar(self, jar_id: str = None):
-        if jar_id is None:
-            selected = self.workspace_tree.get_selected_path()
-            if selected:
-                jar_id = selected[0]
-            else:
+    def save_jar(self, jar_ids: Optional[List[str]] = None, save_all: bool = False):
+        if not jar_ids:
+            if save_all:
                 entries = self.workspace_manager.get_all_entries()
-                if entries:
-                    jar_id = entries[0].jar_id
-                else:
-                    Messagebox.show_info("没有可保存的JAR文件", "提示")
-                    return
-
-        entry = self.workspace_manager.get_entry(jar_id)
-        if not entry:
-            Messagebox.show_error(f"未找到JAR文件: {jar_id}", "保存失败")
-            return
-
-        self.service.apply_all_translations(jar_id)
-        self.update_status("已应用所有翻译")
-        self.service.save_jar(jar_id)
-        self.update_status(f"已保存 JAR 文件：{entry.jar_path}")
+            else:
+                selected = self.workspace_tree.get_selected_path()
+                entries = [self._get_entry(selected[0])] if selected else []
+        else:
+            entries = [self._get_entry(jar_id) for jar_id in jar_ids]
+        
+        if entries:
+            jar_names = []
+            for entry in entries:
+                jar_id = entry.jar_id
+                jar_names.append(entry.jar_name)
+                self.service.apply_all_translations(jar_id)
+                self.service.save_jar(jar_id)
+            if jar_names:
+                self.update_status(f"已保存JAR文件x{len(jar_names)}:{','.join(jar_names)}")
+                return
+        self.update_status("没有可保存的JAR文件")
 
     def _cleanup(self):
         self.service.cleanup()

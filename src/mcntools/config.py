@@ -4,6 +4,8 @@ FONT_FAMILY = "Microsoft YaHei"
 FONT_DEFAULT = (FONT_FAMILY, 10)
 BACKUP_EXT = '.bak'
 CLASS_EXT = '.class'
+JSON_EXT = '.json'
+IMAGE_EXTS = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.ico'}
 CONFIG_FILE = os.path.join('.', "config.json")
 WORKSPACE_DIR = os.path.join('.', '.workspace')
 
@@ -32,3 +34,4 @@ ENGINES = {
     'deepseek': {'name': 'DeepSeek', 'icon': '🐋', 'need_api_key': True, 'desc': '高质量翻译，需API Key'},
     'google': {'name': 'Google', 'icon': '🌐', 'need_api_key': False, 'desc': '免费快速，无需API Key'},
 }
+

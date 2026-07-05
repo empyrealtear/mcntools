@@ -1,10 +1,31 @@
 import json
 import os
-from typing import Dict, List
+from typing import Optional, Dict, List
+from dataclasses import dataclass
 
 from mcntools.core.class_processor import ClassFileProcessor
 from mcntools.core.jar_handler import JarFileHandler, BackupManager
 
+@dataclass
+class TranslationItem:
+    file_path: str
+    index: int
+    original: str
+    translation: str = ""
+
+    @property
+    def is_translated(self) -> bool:
+        return bool(self.translation) and self.translation != self.original
+
+    def to_dict(self) -> Dict:
+        return {
+            '文件': self.file_path,
+            '索引': self.index,
+            '原文': self.original.replace('\n', '\\n').replace('\r', '\\r'),
+            '译文': self.translation.replace('\n', '\\n').replace('\r', '\\r') if self.translation else '',
+            '_file': self.file_path,
+            '_original': self.original
+        }
 
 class TranslationManager:
 
@@ -36,16 +57,16 @@ class TranslationManager:
             return
 
         data = {}
-        for path in self.class_processor.get_all_paths():
+        for path in sorted(self.class_processor.get_all_paths()):
             info = self.class_processor.get_class_info(path)
             if info.translations:
-                data[path] = dict(sorted(info.translations.items()))
+                data[path] = dict(info.translations.items())
 
         os.makedirs(os.path.dirname(self._translations_file), exist_ok=True)
         with open(self._translations_file, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
         self._dirty = False
-        self.file_handler.files[f"{self.jar_name}.json"] = self._translations_file
+        self.file_handler.files.update({f"{self.jar_name}.json": self._translations_file})
 
     def get_translations(self, path: str) -> Dict[str, str]:
         return self.class_processor.get_class_info(path).translations.copy()

@@ -3,7 +3,7 @@ import ttkbootstrap as ttkb
 from typing import List, Optional
 
 
-class MultiSelectDropdown(ttkb.Frame):
+class MultiCombobox(ttkb.Frame):
     def __init__(self, master, values=(), width=12, max_visible=20, **kw):
         super().__init__(master, **kw)
         self._values = list(values)

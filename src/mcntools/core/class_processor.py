@@ -1,9 +1,19 @@
 from typing import Dict, List
-
+from dataclasses import dataclass, field
 from kirjava import load as kirjava_load
 
-from mcntools.models.data import ClassFileInfo
+from mcntools.core import BackupManager
 
+@dataclass
+class ClassFileInfo:
+    path: str
+    bak_path: str = field(init=False)
+    has_backup: bool = False
+    has_original: bool = False
+    translations: Dict[str, str] = field(default_factory=dict)
+
+    def __post_init__(self):
+        self.bak_path = BackupManager.create_backup_path(self.path)
 
 class ClassFileProcessor:
 
@@ -15,7 +25,8 @@ class ClassFileProcessor:
             self._class_cache[path] = ClassFileInfo(path)
         return self._class_cache[path]
 
-    def extract_constants(self, path: str, file_data: bytes) -> Dict[int, str]:
+    @staticmethod
+    def extract_constants(path: str, file_data: bytes) -> Dict[int, str]:
         cf = kirjava_load(file_data)
         result = {}
         for idx, entry in cf.constant_pool:
@@ -23,7 +34,8 @@ class ClassFileProcessor:
                 result[idx] = entry.value
         return result
 
-    def apply_translations(self, path: str, translations: Dict[str, str], file_data: bytes, output_path: str) -> int:
+    @staticmethod
+    def apply_translations(path: str, translations: Dict[str, str], file_data: bytes, output_path: str) -> int:
         if not translations:
             return 0
 
