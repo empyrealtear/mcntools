@@ -172,7 +172,7 @@ class FilteredTreeview(ttkb.Treeview):
             if isinstance(val, ttkb.Entry):
                 val.delete(0, tk.END)
                 self.filter_texts[key] = ''
-        self.file_picker.clear()
+        self.file_picker.select_reset()
         self.translation_filter_var.set('全部')
         self.apply_filters()
 
@@ -219,11 +219,8 @@ class FilteredTreeview(ttkb.Treeview):
             if val.get('filter') == 'regex':
                 pattern = self.filter_texts.get(key, '')
                 if pattern:
-                    try:
-                        if not re.search(pattern, str(item.get(val.get('label'), '')), flags):
-                            return False
-                    except re.error:
-                        pass
+                    if not re.search(pattern, str(item.get(val.get('label'), '')), flags):
+                        return False
         return True
 
     def _match_translation_status(self, item: Dict) -> bool:
@@ -302,7 +299,7 @@ class FilteredTreeview(ttkb.Treeview):
         self.current_data = data.copy()
         all_files = sorted({d['_file'] for d in data if d.get('_file')})
         self.file_picker.set_values(all_files)
-        self.file_picker.select_all()
+        self.file_picker.select_reset()
         self.apply_filters()
 
     def set_filter_texts(self, filter_texts_dict: Dict[str, str]):

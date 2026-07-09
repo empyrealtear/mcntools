@@ -6,8 +6,8 @@ BACKUP_EXT = '.bak'
 CLASS_EXT = '.class'
 JSON_EXT = '.json'
 IMAGE_EXTS = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.ico'}
-CONFIG_FILE = os.path.join('.', "config.json")
-WORKSPACE_DIR = os.path.join('.', '.workspace')
+CONFIG_FILE = "./config.json"
+WORKSPACE_DIR = './.workspace'
 
 LANGUAGES = {
     'auto': '自动检测',

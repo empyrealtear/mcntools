@@ -52,27 +52,19 @@ class GoogleTranslator(BaseTranslator):
                 result[text] = text
                 continue
 
-            try:
-                url = self.API_URL
-                params = {
-                    'client': 'gtx',
-                    'sl': from_lang,
-                    'tl': to_lang,
-                    'dt': 't',
-                    'q': text,
-                }
-
-                response = self._session.get(url, params=params, timeout=10)
-
-                if response.status_code == 200:
-                    data = response.json()
-                    translated = ''.join([part[0] for part in data[0] if part[0]])
-                    result[text] = translated if translated else text
-                else:
-                    result[text] = text
-
-            except Exception as e:
-                print(f"Google 翻译失败: {e}")
+            url = self.API_URL
+            params = {
+                'client': 'gtx',
+                'sl': from_lang,
+                'tl': to_lang,
+                'dt': 't',
+                'q': text,
+            }
+            response = self._session.get(url, params=params, timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                translated = ''.join([part[0] for part in data[0] if part[0]])
+                result[text] = translated if translated else text
+            else:
                 result[text] = text
-
         return result

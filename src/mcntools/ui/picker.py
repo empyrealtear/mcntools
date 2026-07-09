@@ -77,15 +77,13 @@ class MultiCombobox(ttkb.Frame):
     def _update_scrollbars(self):
         self._vsb.grid_remove()
         self._hsb.grid_remove()
-        try:
-            yv = self._listbox.yview()
-            xv = self._listbox.xview()
-            if yv[0] != 0.0 or yv[1] != 1.0:
-                self._vsb.grid(row=0, column=1, sticky='ns')
-            if xv[0] != 0.0 or xv[1] != 1.0:
-                self._hsb.grid(row=1, column=0, sticky='ew')
-        except tk.TclError:
-            pass
+        
+        yv = self._listbox.yview()
+        xv = self._listbox.xview()
+        if yv[0] != 0.0 or yv[1] != 1.0:
+            self._vsb.grid(row=0, column=1, sticky='ns')
+        if xv[0] != 0.0 or xv[1] != 1.0:
+            self._hsb.grid(row=1, column=0, sticky='ew')
 
     def _fill(self):
         if not self._listbox:
@@ -132,22 +130,13 @@ class MultiCombobox(ttkb.Frame):
         if not self._panel or not self._panel.winfo_exists():
             return
         w = event.widget
-        try:
-            if w != self._entry and not str(w).startswith(str(self._panel)):
-                self.hide()
-        except tk.TclError:
-            pass
+        if w != self._entry and not str(w).startswith(str(self._panel)):
+            self.hide()
 
     def hide(self):
         if self._panel:
-            try:
-                self.winfo_toplevel().unbind_all('<Button-1>')
-            except tk.TclError:
-                pass
-            try:
-                self._panel.destroy()
-            except tk.TclError:
-                pass
+            self.winfo_toplevel().unbind_all('<Button-1>')
+            self._panel.destroy()
             self._panel = None
             self._listbox = None
             self._vsb = None
@@ -188,6 +177,10 @@ class MultiCombobox(ttkb.Frame):
         if self._listbox:
             self._fill()
         self.event_generate('<<MultiSelectChanged>>')
+
+    def select_reset(self):
+        self.clear()
+        self.select_all()
 
     def invert(self):
         for v in self._display_list:

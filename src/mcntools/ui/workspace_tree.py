@@ -5,449 +5,567 @@ from tkinter import simpledialog
 from ttkbootstrap.dialogs import Messagebox
 from typing import Dict, Optional, Set, Tuple, List
 
-from mcntools.config import FONT_DEFAULT
-from mcntools.core.jar_handler import BackupManager
+from mcntools.config import FONT_DEFAULT, FONT_FAMILY
+from mcntools.core.jar_handler import JarFileHandler
+from mcntools.core.data_store import DataStore
 
 
 class WorkspaceTree(ttkb.Frame):
 
-    def __init__(self, parent, on_file_select=None,
-                 on_folder_select=None, on_rename=None,
-                 on_backup=None, on_save_jar=None,
-                 backup_var=None, compare_mode_var=None):
+    def __init__(self, parent,
+                 on_file_select=None,
+                 on_folder_select=None,
+                 on_rename=None,
+                 on_backup=None,
+                 on_delete_file=None,
+                 on_save_jar=None,
+                 on_remove_jar=None,
+                 on_nested_jar_select=None,
+                 on_preview_strings=None,
+                 backup_var=None,
+                 compare_mode_var=None):
         super().__init__(parent)
+
         self.on_file_select = on_file_select
         self.on_folder_select = on_folder_select
         self.on_rename = on_rename
         self.on_backup = on_backup
+        self.on_delete_file = on_delete_file
         self.on_save_jar = on_save_jar
-        self.files: Dict[str, Dict[str, str]] = {}
-        self._jar_id_map: Dict[str, str] = {}
-        self.current_path: Optional[Tuple[str, str]] = None
-        self.show_backup = False
-        self.translation_checker = None
+        self.on_remove_jar = on_remove_jar
+        self.on_nested_jar_select = on_nested_jar_select
+        self.on_extract_strings = lambda jar_id, path: on_preview_strings(jar_id, path, extract=True)
+        self.on_preview_strings = on_preview_strings
         self.backup_var = backup_var
         self.compare_mode_var = compare_mode_var
 
-        self._init_ui()
-        self._init_context_menus()
+        self.style = ttkb.Style()
+        self._setup_base_styles()
 
-    def _init_ui(self):
-        tree_frame = ttkb.Frame(self)
-        tree_frame.pack(fill=tk.BOTH, expand=True)
-        self.tree = ttkb.Treeview(tree_frame, show='tree', selectmode='browse')
-        self.tree.tag_configure('translated', foreground='#00bc8c', font=(*FONT_DEFAULT, 'bold'))
-        self.tree.tag_configure('backup', foreground='#ff6b35', font=(*FONT_DEFAULT, 'italic'))
+        self.tree = ttkb.Treeview(self, show='tree', style='Workspace.Treeview')
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        scroll = ttkb.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
-        scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        self.tree.config(yscrollcommand=scroll.set)
-
-        self.tree.bind('<<TreeviewSelect>>', self._on_select)
-        self.tree.bind('<Button-3>', self._show_context_menu)
-        self.tree.bind('<Double-1>', self._on_double_click)
-
-    def _init_context_menus(self):
-        self.file_context_menu = tk.Menu(self.tree, tearoff=0)
-        self.file_context_menu.add_command(label="打开", command=self._open_selected)
-        self.file_context_menu.add_command(label="重命名", command=self._rename_selected)
-        self.file_context_menu.add_command(label="备份", command=self._create_backup_selected)
-        self.file_context_menu.add_command(label="删除", command=self._delete_selected)
-
-        self.folder_context_menu = tk.Menu(self.tree, tearoff=0)
-        self.folder_context_menu.add_command(label="提取字符串", command=self._extract_strings)
-        self.folder_context_menu.add_command(label="预览字符串", command=self._preview_folder)
-        self.folder_context_menu.add_separator()
-        self.folder_context_menu.add_command(label="展开子项", command=self._expand_selected)
-        self.folder_context_menu.add_command(label="折叠子项", command=self._collapse_selected)
-        self.folder_context_menu.add_command(label="折叠其他", command=self._collapse_exclude_selected)
-
-        self.root_context_menu = tk.Menu(self.tree, tearoff=0)
-        self.root_context_menu.add_command(label="保存JAR", command=self._save_jar_selected)
-        self.root_context_menu.add_command(label="移除JAR", command=self._remove_jar_selected)
-        self.root_context_menu.add_separator()
-        self.root_context_menu.add_command(label="展开子项", command=self._expand_selected)
-        self.root_context_menu.add_command(label="折叠子项", command=self._collapse_selected)
-
-    def toggle_backup_visibility(self):
-        self.show_backup = not self.show_backup
-        if self.backup_var:
-            self.backup_var.set(self.show_backup)
-        self.rebuild_tree()
         
+        self.scrollbar = ttkb.Scrollbar(self, orient=tk.VERTICAL, command=self.tree.yview)
+        self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        self.tree.config(yscrollcommand=self.scrollbar.set)
+
+        self._setup_node_tags()
+        self._setup_events()
+        self.current_path: Optional[Tuple[str, str]] = None
+        self.compare_mode = False
+
     def toggle_compare_mode(self):
         self.compare_mode = not self.compare_mode
-        if self.compare_mode_var:
-            self.compare_mode_var.set(self.compare_mode)
-        self.rebuild_tree()
 
-    def _on_select(self, event):
-        path = self.get_selected_path()
-        if path and self.on_file_select:
-            self.current_path = path
-            self.on_file_select(path[0], path[1])
+    def apply_theme(self):
+        self._setup_base_styles()
+        self._setup_node_tags()
 
-    def _on_double_click(self, event):
-        self._open_selected()
+    def _setup_base_styles(self):
+        self.style.configure(
+            'Workspace.Treeview',
+            font=FONT_DEFAULT,
+            rowheight=22,
+            background=self.style.colors.bg,
+            foreground=self.style.colors.fg,
+            fieldbackground=self.style.colors.bg
+        )
+        self.style.configure(
+            'Workspace.Treeview.Heading',
+            font=(FONT_FAMILY, 10, 'bold'),
+            background=self.style.colors.dark,
+            foreground=self.style.colors.fg
+        )
+        self.style.map(
+            'Workspace.Treeview',
+            background=[('selected', self.style.colors.selectbg)],
+            foreground=[('selected', self.style.colors.selectfg)]
+        )
 
-    def _show_context_menu(self, event):
-        item = self.tree.identify_row(event.y)
-        if item:
-            self.tree.selection_set(item)
-            path = self.get_selected_path()
-            if not path:
-                self.root_context_menu.post(event.x_root, event.y_root)
-            elif self._is_directory(path[0], path[1]):
-                self.folder_context_menu.post(event.x_root, event.y_root)
-            else:
-                self.file_context_menu.post(event.x_root, event.y_root)
+    def _setup_node_tags(self):
+        self.tree.tag_configure('root_jar', foreground=self.style.colors.success, font=(FONT_FAMILY, 12, 'bold'))
+        self.tree.tag_configure('nested_jar', foreground=self.style.colors.info, font=(FONT_FAMILY, 12, 'bold'))
+        self.tree.tag_configure('class_translated', foreground=self.style.colors.success, font=(FONT_FAMILY, 10, 'bold'))
+        self.tree.tag_configure('lang_file', foreground=self.style.colors.warning, font=(FONT_FAMILY, 10, 'bold'))
+        self.tree.tag_configure('backup_file', foreground=self.style.colors.warning, font=(FONT_FAMILY, 10, 'bold'))
+        self.tree.tag_configure('dir', foreground=self.style.colors.fg, font=(FONT_FAMILY, 10))
+        self.tree.tag_configure('file', foreground=self.style.colors.fg, font=(FONT_FAMILY, 10))
 
-    def _open_selected(self):
-        if self.current_path and self.on_file_select:
-            self.on_file_select(self.current_path[0], self.current_path[1])
+    def _setup_events(self):
+        self.tree.bind('<ButtonRelease-1>', self._on_click)
+        self.tree.bind('<Button-3>', self._show_context_menu)
 
-    def _rename_selected(self):
-        path = self.get_selected_path()
-        if not path or self._is_directory(path[0], path[1]):
-            Messagebox.show_warning("请选择文件进行重命名", "重命名")
-            return
-        jar_id, file_path = path
-        old_name = os.path.basename(file_path)
-        new_name = simpledialog.askstring("重命名", f"为 '{old_name}' 输入新名称：", initialvalue=old_name)
-        if not new_name or new_name == old_name:
-            return
-        if '/' in new_name or '\\' in new_name:
-            Messagebox.show_error("文件名不能包含路径分隔符", "重命名失败")
-            return
-        new_path = os.path.join(os.path.dirname(file_path), new_name).replace('\\', '/')
-        if new_path in self.files.get(jar_id, {}):
-            Messagebox.show_error(f"文件 '{new_path}' 已存在", "重命名失败")
-            return
-        if self.on_rename and self.on_rename(jar_id, file_path, new_path):
-            self.rebuild_tree()
-            self.select_path(jar_id, new_path)
-        else:
-            Messagebox.show_error("无法重命名文件", "重命名失败")
+    def _is_alt_pressed(self, event) -> bool:
+        alt_mask = 0x20000
+        return bool(event.state & alt_mask)
 
-    def _create_backup_selected(self):
-        if self.current_path and self.on_backup:
-            self.on_backup(self.current_path[0], self.current_path[1])
-
-    def _delete_selected(self):
-        item = self.tree.selection()[0] if self.tree.selection() else None
+    def _on_click(self, event):
+        # print(f'event.state: {event.state} -> {self._is_alt_pressed(event)}')
+        item = self.tree.identify('item', event.x, event.y)
         if not item:
             return
-        path = self.get_path(item)
-        if not path:
+        cache = DataStore.get_node_cache(item)
+        if cache:
+            jar_id, internal_path, node_type = cache
+            if node_type == 'file' or node_type == 'class_translated':
+                # if self.compare_mode and internal_path.endswith('.class') and self.backup_var and self.backup_var.get():
+                #     bak_path = JarFileHandler.create_backup_path(internal_path)
+                #     if bak_path in (DataStore.get_files(jar_id) or {}):
+                #         self.current_path = (jar_id, bak_path)
+                #         if self.on_file_select:
+                #             self.on_file_select(jar_id, bak_path)
+                #         return
+                self.current_path = (jar_id, internal_path)
+                if self.on_file_select:
+                    self.on_file_select(jar_id, internal_path)
+            elif node_type == 'backup_file':
+                self.current_path = (jar_id, internal_path)
+                if self.on_file_select:
+                    self.on_file_select(jar_id, internal_path)
+            elif node_type == 'lang_file':
+                self.current_path = (jar_id, internal_path)
+                if self.on_file_select:
+                    self.on_file_select(jar_id, internal_path)
+            elif node_type == 'dir':
+                self.current_path = (jar_id, internal_path)
+                files = DataStore.get_files(jar_id)
+                load_files = []
+                for f in files:
+                    if f.startswith(internal_path) and JarFileHandler.is_class_path(f):
+                        bak_path = JarFileHandler.create_backup_path(f)
+                        load_files.append(bak_path if self.compare_mode and bak_path in files else f)
+                if self._is_alt_pressed(event) and self.on_preview_strings:
+                    self.on_preview_strings(jar_id, load_files)
+                elif self.on_folder_select:
+                    self.on_folder_select(jar_id, internal_path, load_files)
+            elif node_type == 'nested_jar':
+                self.current_path = (jar_id, '')
+                entry = DataStore.get_entry(jar_id)
+                if entry:
+                    jar_handler = JarFileHandler(entry.temp_dir)
+                    jar_handler.files = entry.files
+                    class_files = jar_handler.get_class_files('')
+                    if self._is_alt_pressed(event) and self.on_preview_strings:
+                        self.on_preview_strings(jar_id, class_files)
+                    elif self.on_nested_jar_select:
+                        self.on_nested_jar_select(jar_id)
+
+    def _show_context_menu(self, event):
+        item = self.tree.identify('item', event.x, event.y)
+        if not item:
             return
-        jar_id, file_path = path
-        name = self.tree.item(item, 'text')
-        if not Messagebox.yesno(f"确定要删除 '{name}' 吗？\n路径: {file_path}", "确认删除"):
+
+        cache = DataStore.get_node_cache(item)
+        if not cache:
             return
-        if jar_id in self.files and file_path in self.files[jar_id]:
-            del self.files[jar_id][file_path]
-        self.tree.delete(item)
-        self.current_path = None
 
-    def _extract_strings(self):
-        if self.current_path and self.on_folder_select:
-            jar_id, folder_path = self.current_path
-            paths = self._get_class_files(jar_id, folder_path)
-            if paths:
-                self.on_folder_select(jar_id, paths, extract=True)
-            else:
-                Messagebox.show_info("没有找到class文件", "提示")
+        jar_id, internal_path, node_type = cache
 
-    def _preview_folder(self):
-        if self.current_path and self.on_folder_select:
-            jar_id, folder_path = self.current_path
-            paths = self._get_class_files(jar_id, folder_path)
-            if paths:
-                self.on_folder_select(jar_id, paths, extract=False)
-            else:
-                Messagebox.show_info("没有找到class文件", "提示")
+        menu = tk.Menu(self, tearoff=0)
 
-    def _save_jar_selected(self):
-        item = self.tree.selection()[0] if self.tree.selection() else None
-        if item and self.tree.parent(item) == '' and self.on_save_jar:
-            jar_id = self.tree.item(item, 'values')[0]
-            self.on_save_jar(jar_id)
+        if node_type == 'root_jar' or node_type == 'nested_jar':
+            menu.add_command(label='保存 JAR', command=lambda: self.on_save_jar(jar_id))
+            menu.add_command(label='移除 JAR', command=lambda: self._remove_jar(jar_id))
+            menu.add_separator()
+            # menu.add_command(label='提取字符串', command=lambda: self._extract_strings(jar_id, internal_path))
+            # menu.add_command(label='预览字符串', command=lambda: self._preview_strings(jar_id, internal_path))
+            # menu.add_separator()
+            menu.add_command(label='展开子项', command=lambda: self._expand_children(item))
+            menu.add_command(label='折叠子项', command=lambda: self._collapse_children(item))
+            menu.add_command(label='折叠其他', command=lambda: self._collapse_others(item))
+        elif node_type == 'dir':
+            menu.add_command(label='提取字符串', command=lambda: self._extract_strings(jar_id, internal_path))
+            menu.add_command(label='预览字符串', command=lambda: self._preview_strings(jar_id, internal_path))
+            menu.add_separator()
+            menu.add_command(label='展开子项', command=lambda: self._expand_children(item))
+            menu.add_command(label='折叠子项', command=lambda: self._collapse_children(item))
+            menu.add_command(label='折叠其他', command=lambda: self._collapse_others(item))
+        elif node_type == 'file' or node_type == 'class_translated' or node_type == 'backup_file' or node_type == 'lang_file':
+            menu.add_command(label='预览文件', command=lambda: self._preview_file(jar_id, internal_path))
+            menu.add_command(label='创建备份', command=lambda: self._create_backup(jar_id, internal_path))
+            menu.add_separator()
+            menu.add_command(label='重命名', command=lambda: self._rename_file(jar_id, internal_path))
+            menu.add_command(label='删除文件', command=lambda: self._delete_file(jar_id, internal_path))
 
-    def _remove_jar_selected(self):
-        item = self.tree.selection()[0] if self.tree.selection() else None
-        if item and self.tree.parent(item) == '':
-            jar_id = self.tree.item(item, 'values')[0]
-            jar_name = self.tree.item(item, 'text')
-            if Messagebox.yesno(f"确定要移除 '{jar_name}' 吗？", "确认移除"):
-                self.tree.delete(item)
-                if jar_id in self.files:
-                    del self.files[jar_id]
-                if jar_name in self._jar_id_map:
-                    del self._jar_id_map[jar_name]
-                self.current_path = None
+        menu.tk_popup(event.x_root, event.y_root)
 
-    def _expand_selected(self):
-        path = self.get_selected_path()
-        if path and self._is_directory(path[0], path[1]):
-            self._expand(self.tree.selection()[0])
-        else:
-            item = self.tree.selection()[0] if self.tree.selection() else None
-            if item and self.tree.parent(item) == '':
-                self._expand(item)
-            else:
-                self.expand_all()
-
-    def _collapse_selected(self):
-        path = self.get_selected_path()
-        if path and self._is_directory(path[0], path[1]):
-            self._collapse(self.tree.selection()[0])
-        else:
-            item = self.tree.selection()[0] if self.tree.selection() else None
-            if item and self.tree.parent(item) == '':
-                self._collapse(item)
-            else:
-                self.collapse_all()
-
-    def _collapse_exclude_selected(self):
-        path = self.get_selected_path()
-        if path and self._is_directory(path[0], path[1]):
-            for item in self.tree.get_children():
-                self._collapse(item, filter_func=lambda x: x not in path[1])
-        else:
-            self.collapse_all()
-
-    def _get_class_files(self, jar_id: str, path: str) -> list:
-        jar_files = self.files.get(jar_id, {})
-        if path in jar_files:
-            return [path] if path.endswith('.class') and not BackupManager.is_backup_path(path) else []
-        return [p for p in jar_files if p.startswith(path + '/')
-                    and BackupManager.is_class_path(p)
-                    and not BackupManager.is_class_backup_path(p)]
-
-    def _is_directory(self, jar_id: str, path: str) -> bool:
-        jar_files = self.files.get(jar_id, {})
-        if path in jar_files:
-            return False
-        return any(p.startswith(path + '/') for p in jar_files)
-
-    def get_selected_path(self) -> Optional[Tuple[str, str]]:
-        sel = self.tree.selection()
-        return self.get_path(sel[0]) if sel else None
-
-    def get_path(self, item) -> Optional[Tuple[str, str]]:
-        parts = []
-        jar_id = None
-        while item:
-            text = self.tree.item(item, 'text')
-            values = self.tree.item(item, 'values')
-            if values and len(values) > 0:
-                jar_id = values[0]
-            parts.insert(0, text)
-            item = self.tree.parent(item)
-        if len(parts) > 1 and jar_id:
-            internal_path = '/'.join(parts[1:])
-            return (jar_id, internal_path)
-        return None
-
-    def expand_all(self):
-        for item in self.tree.get_children():
-            self._expand(item)
-
-    def _expand(self, item):
+    def _expand_children(self, item):
         self.tree.item(item, open=True)
         for child in self.tree.get_children(item):
-            self._expand(child)
+            self._expand_children(child)
 
-    def collapse_all(self):
-        for item in self.tree.get_children():
-            self._collapse(item)
-
-    def _collapse(self, item, filter_func=None):
-        if not self.tree.item(item).get('open'):
-            return
-        if filter_func:
-            path = self.get_path(item)
-            if path and filter_func(path[1]):
-                self.tree.item(item, open=False)
-        else:
-            self.tree.item(item, open=False)
+    def _collapse_children(self, item):
         for child in self.tree.get_children(item):
-            self._collapse(child, filter_func=filter_func)
+            self._collapse_children(child)
+        self.tree.item(item, open=False)
 
-    def select_path(self, jar_id: str, internal_path: str):
-        self._navigate_path(jar_id, internal_path, select=True)
+    def _collapse_others(self, item):
+        parent = self.tree.parent(item)
+        # TODO: 匹配排除当前选中项所在路径，即遍历的时候，路径包含在当前选中项的路径中，不折叠
+        for sibling in self.tree.get_children(parent):
+            if sibling != item:
+                self._collapse_children(sibling)
 
-    def expand_path(self, jar_id: str, internal_path: str):
-        self._navigate_path(jar_id, internal_path, select=False)
+    def _extract_strings(self, jar_id, path):
+        entry = DataStore.get_entry(jar_id)
+        if entry and self.on_extract_strings:
+            jar_handler = JarFileHandler(entry.temp_dir)
+            jar_handler.files = entry.files
+            class_files = jar_handler.get_class_files(path)
+            self.on_extract_strings(jar_id, class_files)
 
-    def _navigate_path(self, jar_id: str, internal_path: str, select: bool = False, fire_callback: bool = True):
-        parts = internal_path.split('/')
+    def _preview_strings(self, jar_id, path):
+        entry = DataStore.get_entry(jar_id)
+        if entry and self.on_preview_strings:
+            jar_handler = JarFileHandler(entry.temp_dir)
+            jar_handler.files = entry.files
+            class_files = jar_handler.get_class_files(path)
+            self.on_preview_strings(jar_id, class_files)
 
-        def find(parent, index):
-            if index >= len(parts):
-                return parent
-            for child in self.tree.get_children(parent):
-                if self.tree.item(child, 'text') == parts[index]:
-                    self.tree.item(child, open=True)
-                    return find(child, index + 1)
-            return None
+    def _preview_file(self, jar_id, path):
+        self.current_path = (jar_id, path)
+        if self.on_file_select:
+            self.on_file_select(jar_id, path)
 
-        root_item = None
-        for item in self.tree.get_children(''):
-            values = self.tree.item(item, 'values')
-            if values and len(values) > 0 and values[0] == jar_id:
-                root_item = item
+    def _remove_jar(self, jar_id: str):
+        entry = DataStore.get_entry(jar_id)
+        if not entry:
+            return
+        if Messagebox.yesno(f'确定要移除 JAR "{entry.jar_name}" 吗？', '确认移除') in ['Yes', '确认']:
+            self.on_save_jar(jar_id)
+            if self.on_remove_jar:
+                self.on_remove_jar(jar_id)
+
+    def remove_jar_node(self, jar_id: str):
+        for item in self.tree.get_children():
+            cache = DataStore.get_node_cache(item)
+            if cache and cache[0] == jar_id:
+                self.tree.delete(item)
+                return
+        for item in self.tree.get_children():
+            self._remove_tree_item_recursive(item, jar_id)
+
+    def _remove_tree_item_recursive(self, parent_item: str, jar_id: str):
+        for child in self.tree.get_children(parent_item):
+            cache = DataStore.get_node_cache(child)
+            if cache and cache[0] == jar_id:
+                self.tree.delete(child)
+            else:
+                self._remove_tree_item_recursive(child, jar_id)
+
+    def _remove_tree_item_by_jar_id(self, jar_id: str):
+        for item in self.tree.get_children():
+            cache = DataStore.get_node_cache(item)
+            if cache and cache[0] == jar_id:
+                self.tree.delete(item)
                 break
 
-        if not root_item:
-            return
+    def _restore_backup(self, jar_id: str, path: str):
+        if self.on_backup:
+            self.on_backup(jar_id, path, restore=True)
 
-        item = find(root_item, 0)
-        if item and select:
-            self.tree.selection_set(item)
-            self.tree.see(item)
-            self.current_path = (jar_id, internal_path)
-            if fire_callback and self.on_file_select:
-                self.on_file_select(jar_id, internal_path)
+    def _create_backup(self, jar_id: str, path: str):
+        if self.on_backup:
+            self.on_backup(jar_id, path, restore=False)
 
-    def build_tree(self, files_by_jar: Dict[str, Dict[str, str]]):
-        self.files = files_by_jar
-        self.rebuild_tree()
+    def _rename_file(self, jar_id: str, path: str):
+        new_name = simpledialog.askstring('重命名', '输入新文件名:', initialvalue=os.path.basename(path))
+        if new_name:
+            new_path = os.path.join(os.path.dirname(path), new_name)
+            if self.on_rename:
+                self.on_rename(jar_id, path, new_path)
+            self._refresh()
 
-    def add_jar_node(self, jar_id: str, jar_name: str, files: Dict[str, str]):
-        if jar_id in self.files:
-            for item in self.tree.get_children():
-                if self.tree.item(item, 'values')[0] == jar_id:
-                    self.tree.delete(item)
-                    break
+    def _delete_file(self, jar_id: str, path: str):
+        if Messagebox.yesno(f'确定要删除文件 "{path}" 吗？', '确认删除') in ['Yes', '确认']:
+            if self.on_delete_file:
+                self.on_delete_file(jar_id, path)
+            self._refresh()
 
-        self.files[jar_id] = files
-        self._jar_id_map[jar_name] = jar_id
+    def _rename_folder(self, jar_id: str, path: str):
+        new_name = simpledialog.askstring('重命名', '输入新文件夹名:', initialvalue=os.path.basename(path))
+        if new_name:
+            new_path = os.path.join(os.path.dirname(path), new_name)
+            if self.on_rename:
+                self.on_rename(jar_id, path, new_path)
+            self._refresh()
 
-        root = self.tree.insert("", "end", text=jar_name, values=(jar_id,), open=True)
-        self._build_tree_node(root, jar_id, files)
+    def clear(self):
+        self.tree.delete(*self.tree.get_children())
+        self.current_path = None
 
-    def _build_tree_node(self, root, jar_id: str, files: Dict[str, str]):
-        """构建JAR节点的文件树"""
-        filtered = [f for f in files if not BackupManager.is_backup_path(f) or self.show_backup]
-        tree = {}
-        for path in filtered:
-            parts = path.split('/')
-            cur = tree
-            for p in parts[:-1]:
-                cur = cur.setdefault(p, {})
-            if parts[-1]:
-                cur[parts[-1]] = None
+    def refresh(self):
+        self._refresh()
 
-        def add(parent, data):
-            for name, children in sorted(data.items()):
-                if children is None:
-                    file_path = self._build_path(parent, name)
-                    tags = ('file',)
-                    if BackupManager.is_backup_path(file_path):
-                        tags = ('file', 'backup')
-                    if self.translation_checker and file_path.endswith('.class') and not BackupManager.is_backup_path(file_path):
-                        if self.translation_checker(jar_id, file_path):
-                            tags = ('file', 'translated')
-                    self.tree.insert(parent, "end", text=name, tags=tags)
-                else:
-                    node = self.tree.insert(parent, "end", text=name, tags=('dir',))
-                    add(node, children)
+    def _refresh(self):
+        expanded_paths = self._save_expanded_states()
+        self.clear()
+        self._populate_root_jars()
+        self._restore_expanded_states(expanded_paths)
 
-        add(root, tree)
+    def _save_expanded_states(self) -> set:
+        expanded = set()
+        def walk(node):
+            if self.tree.item(node, 'open'):
+                cache = DataStore.get_node_cache(node)
+                if cache:
+                    jar_id, internal_path, node_type = cache
+                    expanded.add((jar_id, internal_path))
+            for child in self.tree.get_children(node):
+                walk(child)
+        for root in self.tree.get_children():
+            walk(root)
+        return expanded
 
-    def rebuild_tree(self):
-        expanded_paths = self._get_expanded_paths()
-        selected_path = self.get_selected_path()
+    def _restore_expanded_states(self, expanded_paths: set):
+        def walk(node):
+            cache = DataStore.get_node_cache(node)
+            if cache:
+                jar_id, internal_path, node_type = cache
+                if (jar_id, internal_path) in expanded_paths:
+                    self.tree.item(node, open=True)
+            for child in self.tree.get_children(node):
+                walk(child)
+        for root in self.tree.get_children():
+            walk(root)
 
-        for item in self.tree.get_children():
-            self.tree.delete(item)
-
-        for jar_id, files in self.files.items():
-            jar_name = jar_id
-            for name, id_ in self._jar_id_map.items():
+    def _populate_root_jars(self):
+        root_jar_ids = [jar_id for jar_id in DataStore.get_all_files() if jar_id not in DataStore.nested_jar_info]
+        for jar_id in root_jar_ids:
+            files = DataStore.get_files(jar_id) or {}
+            jar_name = None
+            for name, id_ in DataStore.jar_id_map.items():
                 if id_ == jar_id:
                     jar_name = name
                     break
+            if jar_name:
+                root = self.tree.insert('', tk.END, text=jar_name, open=True, tags=('root_jar',))
+                DataStore.add_node_cache(root, jar_id, '', 'root_jar')
+                self._populate_tree(root, jar_id, files)
+                self._populate_nested_jars(root, jar_id)
 
-            root = self.tree.insert("", "end", text=jar_name, values=(jar_id,), open=True)
-            self._build_tree_node(root, jar_id, files)
+    def _populate_nested_jars(self, parent_node: str, jar_id: str):
+        entry = DataStore.get_entry(jar_id)
+        if not entry:
+            return
+        for child_id in entry.children:
+            child_entry = DataStore.get_entry(child_id)
+            if child_entry:
+                nested_path = child_entry.nested_jar_path
+                if nested_path:
+                    parts = nested_path.split('/')
+                    jar_name = parts[-1]
+                    current_node = parent_node
+                    for part in parts[:-1]:
+                        existing = self.tree.get_children(current_node)
+                        found = False
+                        for child in existing:
+                            if self.tree.item(child, 'text') == part:
+                                current_node = child
+                                found = True
+                                break
+                        if not found:
+                            node_id = self.tree.insert(current_node, tk.END, text=part, open=False, tags=('dir',))
+                            DataStore.add_node_cache(node_id, jar_id, '/'.join(parts[:parts.index(part)+1]), 'dir')
+                            current_node = node_id
+                    jar_node = self.tree.insert(current_node, tk.END, text=jar_name, open=False, tags=('nested_jar',))
+                    DataStore.add_node_cache(jar_node, child_id, '', 'nested_jar')
+                    nested_files = DataStore.get_files(child_id)
+                    if nested_files:
+                        self._populate_tree(jar_node, child_id, nested_files)
+                        self._populate_nested_jars(jar_node, child_id)
 
-        for jar_id, path in expanded_paths:
-            self._expand_path_no_select(jar_id, path)
+    def _populate_tree(self, parent_node: str, jar_id: str, files: Dict[str, str]):
+        dirs = {}
+        file_list = []
 
-        if selected_path:
-            jar_id, internal_path = selected_path
-            if jar_id in self.files:
-                if internal_path in self.files[jar_id] or self._is_directory(jar_id, internal_path):
-                    self._navigate_path(jar_id, internal_path, select=True, fire_callback=False)
-                elif self.current_path and (self.current_path[0] not in self.files or 
-                                           self.current_path[1] not in self.files[self.current_path[0]]):
-                    self.current_path = None
+        show_backup = self.backup_var.get() if self.backup_var else False
 
-    def _build_path(self, parent_item, name: str) -> str:
-        parts = []
-        while parent_item:
-            parts.insert(0, self.tree.item(parent_item, 'text'))
-            parent_item = self.tree.parent(parent_item)
-        if parts:
-            parts = parts[1:]
-        parts.append(name)
-        return '/'.join(parts)
+        for path in files:
+            if JarFileHandler.is_class_backup_path(path) and not show_backup:
+                continue
+            parts = path.split('/')
+            if len(parts) > 1:
+                dir_path = '/'.join(parts[:-1])
+                if dir_path not in dirs:
+                    dirs[dir_path] = []
+                dirs[dir_path].append((path, parts[-1]))
+            else:
+                file_list.append(path)
 
-    def _get_expanded_paths(self) -> Set[Tuple[str, str]]:
-        expanded = set()
+        for dir_path in sorted(dirs.keys()):
+            parts = dir_path.split('/')
+            current_node = parent_node
+            for part in parts:
+                existing = self.tree.get_children(current_node)
+                found = False
+                for child in existing:
+                    if self.tree.item(child, 'text') == part:
+                        current_node = child
+                        found = True
+                        break
+                if not found:
+                    node_id = self.tree.insert(current_node, tk.END, text=part, open=False, tags=('dir',))
+                    DataStore.add_node_cache(node_id, jar_id, '/'.join(parts[:parts.index(part)+1]), 'dir')
+                    current_node = node_id
 
-        def traverse(item, jar_id, parent_path):
-            if self.tree.item(item, 'open'):
-                if parent_path:
-                    expanded.add((jar_id, parent_path))
-                for child in self.tree.get_children(item):
-                    child_name = self.tree.item(child, 'text')
-                    child_path = parent_path + '/' + child_name if parent_path else child_name
-                    traverse(child, jar_id, child_path)
+            for full_path, file_name in sorted(dirs[dir_path], key=lambda x: x[1]):
+                if file_name.endswith('.jar'):
+                    continue
+                tags = self._get_file_tags(jar_id, full_path)
+                file_node = self.tree.insert(current_node, tk.END, text=file_name, open=False, tags=tags)
+                DataStore.add_node_cache(file_node, jar_id, full_path, self._get_node_type(jar_id, full_path))
 
-        for root_child in self.tree.get_children(''):
-            values = self.tree.item(root_child, 'values')
-            jar_id = values[0] if values else self.tree.item(root_child, 'text')
-            traverse(root_child, jar_id, '')
+        for file_name in sorted(file_list):
+            if file_name.endswith('.jar'):
+                continue
+            tags = self._get_file_tags(jar_id, file_name)
+            file_node = self.tree.insert(parent_node, tk.END, text=file_name, open=False, tags=tags)
+            DataStore.add_node_cache(file_node, jar_id, file_name, self._get_node_type(jar_id, file_name))
 
-        return expanded
+    def _find_nested_jar_id(self, parent_jar_id: str, nested_path: str) -> Optional[str]:
+        for nested_jar_id, info in DataStore.nested_jar_info.items():
+            if info.get('parent_jar_id') == parent_jar_id and info.get('nested_jar_path') == nested_path:
+                return nested_jar_id
+        return None
 
-    def _expand_path_no_select(self, jar_id: str, path: str):
-        parts = path.split('/')
+    def _get_file_tags(self, jar_id: str, path: str) -> tuple:
+        tags = []
+        if JarFileHandler.is_class_backup_path(path):
+            tags.append('backup_file')
+        elif path.endswith('.class'):
+            info = DataStore.get_class_info(jar_id, path)
+            if info.translations:
+                tags.append('class_translated')
+            else:
+                tags.append('file')
+        elif path.endswith('.json'):
+            entry = DataStore.get_entry(jar_id)
+            if entry and path == f"{entry.jar_name}.json":
+                tags.append('lang_file')
+            else:
+                tags.append('file')
+        else:
+            tags.append('file')
+        return tuple(tags) if tags else ('file',)
 
-        def find(parent, index):
-            if index >= len(parts):
-                return
-            for child in self.tree.get_children(parent):
-                if self.tree.item(child, 'text') == parts[index]:
-                    self.tree.item(child, open=True)
-                    find(child, index + 1)
-                    break
+    def _get_node_type(self, jar_id: str, path: str) -> str:
+        if JarFileHandler.is_class_backup_path(path):
+            return 'backup_file'
+        elif path.endswith('.json'):
+            entry = DataStore.get_entry(jar_id)
+            if entry and path == f"{entry.jar_name}.json":
+                return 'lang_file'
+            else:
+                return 'file'
+        else:
+            return 'file'
 
-        root_item = None
-        for item in self.tree.get_children(''):
-            values = self.tree.item(item, 'values')
-            if values and len(values) > 0 and values[0] == jar_id:
-                root_item = item
+    def select_jar(self, jar_id: str):
+        for item in self.tree.get_children():
+            cache = DataStore.get_node_cache(item)
+            if cache and cache[0] == jar_id:
+                self.tree.selection_set(item)
                 break
 
-        if root_item:
-            find(root_item, 0)
+    def select_path(self, jar_id: str, path: str):
+        if not path:
+            self.select_jar(jar_id)
+            return
+
+        for item in self.tree.get_children():
+            cache = DataStore.get_node_cache(item)
+            if cache and cache[0] == jar_id:
+                if cache[1] == path:
+                    self.tree.selection_set(item)
+                    return
+                self._search_path_in_tree(item, jar_id, path)
+
+    def _search_path_in_tree(self, parent_node: str, jar_id: str, path: str):
+        for child in self.tree.get_children(parent_node):
+            cache = DataStore.get_node_cache(child)
+            if cache and cache[0] == jar_id:
+                if cache[1] == path:
+                    self.tree.selection_set(child)
+                    return
+                self._search_path_in_tree(child, jar_id, path)
+
+    def get_selected_path(self) -> Optional[Tuple[str, str]]:
+        selected = self.tree.selection()
+        if selected:
+            return self.current_path
+        return None
+
+    def expand_all(self):
+        def expand(item):
+            self.tree.item(item, open=True)
+            for child in self.tree.get_children(item):
+                expand(child)
+        for item in self.tree.get_children():
+            expand(item)
+
+    def collapse_all(self):
+        def collapse(item):
+            self.tree.item(item, open=False)
+            for child in self.tree.get_children(item):
+                collapse(child)
+        for item in self.tree.get_children():
+            collapse(item)
+
+    def insert_nested_jar(self, parent_jar_id: str, nested_jar_id: str, nested_jar_path: str):
+        files = DataStore.get_files(parent_jar_id)
+        if not files:
+            return
+
+        parts = nested_jar_path.split('/')
+        jar_name = parts[-1]
+
+        parent_node = self._find_node_by_jar_id(parent_jar_id)
+        if not parent_node:
+            return
+
+        current_node = parent_node
+        for part in parts[:-1]:
+            existing = self.tree.get_children(current_node)
+            found = False
+            for child in existing:
+                if self.tree.item(child, 'text') == part:
+                    current_node = child
+                    found = True
+                    break
+            if not found:
+                node_id = self.tree.insert(current_node, tk.END, text=part, open=False)
+                DataStore.add_node_cache(node_id, parent_jar_id, '/'.join(parts[:parts.index(part)+1]), 'dir')
+                current_node = node_id
+
+        jar_node = self.tree.insert(current_node, tk.END, text=jar_name, open=False, tags=('nested_jar',))
+        DataStore.add_node_cache(jar_node, nested_jar_id, '', 'nested_jar')
+        
+        nested_files = DataStore.get_files(nested_jar_id)
+        if nested_files:
+            self._populate_tree(jar_node, nested_jar_id, nested_files)
+
+    def _find_node_by_jar_id(self, jar_id: str, parent: str = '') -> Optional[str]:
+        for item in self.tree.get_children(parent):
+            cache = DataStore.get_node_cache(item)
+            if cache and cache[0] == jar_id:
+                return item
+            result = self._find_node_by_jar_id(jar_id, item)
+            if result:
+                return result
+        return None
+
+    def toggle_backup_visibility(self):
+        self._refresh()
 
     def set_translation_checker(self, checker):
         self.translation_checker = checker
 
-    def remove_jar(self, jar_id: str):
-        for item in self.tree.get_children(''):
-            values = self.tree.item(item, 'values')
-            if values and len(values) > 0 and values[0] == jar_id:
-                jar_name = self.tree.item(item, 'text')
-                self.tree.delete(item)
-                if jar_name in self._jar_id_map:
-                    del self._jar_id_map[jar_name]
-                break
-        if jar_id in self.files:
-            del self.files[jar_id]
+    def add_jar_node(self, jar_id, jar_name, files, parent_jar_id=None, nested_jar_path=None):
+        if parent_jar_id:
+            self.insert_nested_jar(parent_jar_id, jar_id, nested_jar_path)
+        else:
+            root = self.tree.insert('', tk.END, text=jar_name, open=True, tags=('root_jar',))
+            DataStore.add_node_cache(root, jar_id, '', 'root_jar')
+            self._populate_tree(root, jar_id, files)

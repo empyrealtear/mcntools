@@ -36,45 +36,34 @@ class DeepSeekTranslator(BaseTranslator):
         if result is not None:
             return result
 
-        try:
-            self._rate_limit()
+        self._rate_limit()
+        to_name = self.lang_names.get(self.to_code, self.to_code)
+        response = requests.post(
+            self.API_URL,
+            headers={
+                'Authorization': f'Bearer {self.api_key}',
+                'Content-Type': 'application/json'
+            },
+            json={
+                'model': 'deepseek-chat',
+                'messages': [
+                    {'role': 'system', 'content': self.SYSTEM_PROMPT},
+                    {'role': 'user', 'content': f"翻译成{to_name},待翻译文本:{json.dumps(texts, ensure_ascii=False)}"}
+                ],
+                'temperature': 0.3,
+                'max_tokens': 4096,
+                'top_p': 0.9
+            },
+            timeout=60
+        )
 
-            to_name = self.lang_names.get(self.to_code, self.to_code)
-
-            response = requests.post(
-                self.API_URL,
-                headers={
-                    'Authorization': f'Bearer {self.api_key}',
-                    'Content-Type': 'application/json'
-                },
-                json={
-                    'model': 'deepseek-chat',
-                    'messages': [
-                        {'role': 'system', 'content': self.SYSTEM_PROMPT},
-                        {'role': 'user', 'content': f"翻译成{to_name},待翻译文本:{json.dumps(texts, ensure_ascii=False)}"}
-                    ],
-                    'temperature': 0.3,
-                    'max_tokens': 4096,
-                    'top_p': 0.9
-                },
-                timeout=60
-            )
-
-            if response.status_code == 200:
-                data = response.json()
-                content = data.get('choices', [{}])[0].get('message', {}).get('content', '')
-                return self._parse_response(content, texts)
-            else:
-                return {text: text for text in texts}
-
-        except Exception as e:
-            print(f"DeepSeek 翻译失败: {e}")
+        if response.status_code == 200:
+            data = response.json()
+            content = data.get('choices', [{}])[0].get('message', {}).get('content', '')
+            return self._parse_response(content, texts)
+        else:
             return {text: text for text in texts}
 
     def _parse_response(self, content: str, texts: List[str]) -> Dict[str, str]:
-        try:
-            data = json.loads(content)
-            return data if data else {}
-        except Exception as e:
-            print(f"解析 DeepSeek 响应失败: {e}")
-            return {text: text for text in texts}
+        data = json.loads(content)
+        return data if data else {}

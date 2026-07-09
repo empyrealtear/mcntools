@@ -4,17 +4,9 @@ import tkinter as tk
 import tkinter.font as tkfont
 import ttkbootstrap as ttkb
 from typing import Optional, List, Dict, Any
+from PIL import Image, ImageTk
 
 from mcntools.config import FONT_DEFAULT, IMAGE_EXTS, JSON_EXT
-
-try:
-    from PIL import Image, ImageTk
-    PIL_AVAILABLE = True
-except ImportError:
-    PIL_AVAILABLE = False
-
-
-
 
 
 class JSONPreviewNode:
@@ -35,10 +27,7 @@ class TextPreview(ttkb.Frame):
 
     @staticmethod
     def _theme_colors():
-        try:
-            return ttkb.Style().colors
-        except Exception:
-            return None
+        return ttkb.Style().colors
 
     def __init__(self, master, font=FONT_DEFAULT, json_mode: bool = False, readonly: bool = False, **kw):
         super().__init__(master, **kw)
@@ -252,11 +241,7 @@ class TextPreview(ttkb.Frame):
             i += 1
 
     def _build_json_cache(self, text: str):
-        try:
-            data = json.loads(text)
-        except Exception:
-            return
-
+        data = json.loads(text)
         lines = text.split('\n')
         self._root_node = JSONPreviewNode('', data, '{0}', 1, len(lines))
         self._node_by_line[self._root_node.start_line] = self._root_node
@@ -421,11 +406,8 @@ class TextPreview(ttkb.Frame):
 
     def _redraw_gutter(self):
         self.gutter.delete('all')
-        try:
-            gw = self.gutter.winfo_width()
-            txth = self.text.winfo_height()
-        except Exception:
-            return
+        gw = self.gutter.winfo_width()
+        txth = self.text.winfo_height()
         if gw < 5 or txth < 5:
             self.after(60, self._redraw_gutter)
             return
@@ -435,10 +417,7 @@ class TextPreview(ttkb.Frame):
         guard = 0
         while li <= last_line and guard < 5000:
             guard += 1
-            try:
-                bbox = self.text.bbox(f"{li}.0")
-            except Exception:
-                bbox = None
+            bbox = self.text.bbox(f"{li}.0")
             if not bbox:
                 li += 1
                 continue
@@ -462,10 +441,7 @@ class ImagePreview(ttkb.Frame):
 
     @staticmethod
     def _theme_colors():
-        try:
-            return ttkb.Style().colors
-        except Exception:
-            return None
+        return ttkb.Style().colors
 
     def __init__(self, master, **kw):
         super().__init__(master, **kw)
@@ -495,13 +471,6 @@ class ImagePreview(ttkb.Frame):
         self.canvas.config(bg=bg)
 
     def set_content(self, content: bytes):
-        if not PIL_AVAILABLE:
-            self.canvas.delete('all')
-            self.canvas.create_text(self.canvas.winfo_width() // 2 or 100,
-                                    self.canvas.winfo_height() // 2 or 100,
-                                    text="未安装 Pillow，无法预览图片",
-                                    fill='red')
-            return
         from io import BytesIO
         self._image = Image.open(BytesIO(content))
         self._image.load()
@@ -558,11 +527,8 @@ class ImagePreview(ttkb.Frame):
         scale = self._scale
         nw = max(1, int(iw * scale))
         nh = max(1, int(ih * scale))
-        try:
-            resized = self._image.resize((nw, nh), Image.LANCZOS)
-            self._photo = ImageTk.PhotoImage(resized)
-        except Exception:
-            return
+        resized = self._image.resize((nw, nh), Image.LANCZOS)
+        self._photo = ImageTk.PhotoImage(resized)
         self.canvas.delete('all')
         self.canvas.create_image(cw // 2, ch // 2, image=self._photo, anchor='center')
         pct = int(self._scale * 100) if self._scale <= 32 else 3200
@@ -606,7 +572,7 @@ class FilePreview(ttkb.Frame):
 
     def set_content(self, path: str, content: bytes):
         ext = os.path.splitext(path)[1].lower()
-        if ext in IMAGE_EXTS and PIL_AVAILABLE:
+        if ext in IMAGE_EXTS:
             self._switch('image')
             self._widget.set_content(content)
             return
@@ -625,10 +591,7 @@ class FilePreview(ttkb.Frame):
 
     @staticmethod
     def _pretty_json(text: str) -> str:
-        try:
-            return json.dumps(json.loads(text), ensure_ascii=False, indent=4)
-        except Exception:
-            return text
+        return json.dumps(json.loads(text), ensure_ascii=False, indent=4)
 
     def _switch(self, mode):
         if self._mode == mode and self._widget is not None:

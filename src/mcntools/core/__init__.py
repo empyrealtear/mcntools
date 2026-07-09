@@ -1,8 +1,6 @@
-from .jar_handler import JarFileHandler, BackupManager
-from .class_processor import ClassFileProcessor
-from .translation_manager import TranslationManager
-from .translation_service import TranslationService
-from .workspace_manager import WorkspaceManager
-from .jar_entry import JarEntry
+from .jar_handler import JarFileHandler
+from .data_store import DataStore
+from .types import JarEntry, ClassFileInfo, TranslationItem
+from .workspace_service import WorkspaceService
 
-__all__ = ['JarFileHandler', 'BackupManager', 'ClassFileProcessor', 'TranslationManager', 'TranslationService', 'WorkspaceManager', 'JarEntry']
+__all__ = ['JarFileHandler', 'DataStore', 'JarEntry', 'ClassFileInfo', 'TranslationItem', 'WorkspaceService']
